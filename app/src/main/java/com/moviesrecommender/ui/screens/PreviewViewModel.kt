@@ -10,6 +10,7 @@ import com.moviesrecommender.data.remote.tmdb.MediaType
 import com.moviesrecommender.data.remote.tmdb.Title
 import com.moviesrecommender.data.remote.tmdb.TmdbResult
 import com.moviesrecommender.data.remote.wikidata.Award
+import com.moviesrecommender.util.ToastManager
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -25,6 +26,8 @@ sealed class PreviewUiState {
     data class Loaded(
         val title: Title,
         val rating: Int?,
+        val isStarred: Boolean = false,
+        val starPendingConfirm: Boolean = false,
         val wikipediaUrl: String? = null,
         val wikipediaReady: Boolean = false,
         val awards: List<Award> = emptyList(),
@@ -69,9 +72,16 @@ class PreviewViewModel(
                 rating = SearchViewModel.parseRating(cachedList, preloaded.title)
             )
             loadWikidataMetadata(preloaded)
+            viewModelScope.launch { loadStarStatus() }
         } else {
             viewModelScope.launch { load() }
         }
+    }
+
+    private suspend fun loadStarStatus() {
+        val starred = app.localStorageService.isStarred(tmdbId)
+        val current = _uiState.value as? PreviewUiState.Loaded ?: return
+        _uiState.value = current.copy(isStarred = starred)
     }
 
     private fun loadWikidataMetadata(title: Title) {
@@ -89,6 +99,7 @@ class PreviewViewModel(
 
     private suspend fun load() = coroutineScope {
         val detailsDeferred = async { tmdbService.fetchDetails(tmdbId, mediaType) }
+        val isStarredDeferred = async { app.localStorageService.isStarred(tmdbId) }
         // Use cached list from Recommend/Rate flow to avoid redundant download
         val cached = app.cachedListContent
         if (cached != null) {
@@ -105,11 +116,34 @@ class PreviewViewModel(
                 val t = result.value
                 _uiState.value = PreviewUiState.Loaded(
                     title = t,
-                    rating = listContent?.let { SearchViewModel.parseRating(it, t.title) }
+                    rating = listContent?.let { SearchViewModel.parseRating(it, t.title) },
+                    isStarred = isStarredDeferred.await()
                 )
                 loadWikidataMetadata(t)
             }
             is TmdbResult.Failure -> _uiState.value = PreviewUiState.Error("Failed to load title")
+        }
+    }
+
+    fun onStarTap() {
+        val loaded = _uiState.value as? PreviewUiState.Loaded ?: return
+        if (loaded.starPendingConfirm) {
+            _uiState.value = loaded.copy(starPendingConfirm = false)
+            viewModelScope.launch {
+                if (loaded.isStarred) {
+                    app.localStorageService.removeStar(tmdbId)
+                    val current = _uiState.value as? PreviewUiState.Loaded ?: return@launch
+                    _uiState.value = current.copy(isStarred = false)
+                } else {
+                    app.localStorageService.addStar(tmdbId, loaded.title.mediaType.name)
+                    val current = _uiState.value as? PreviewUiState.Loaded ?: return@launch
+                    _uiState.value = current.copy(isStarred = true)
+                }
+            }
+        } else {
+            val action = if (loaded.isStarred) "remove from" else "add to"
+            ToastManager.show("Tap again to $action wishlist.")
+            _uiState.value = loaded.copy(starPendingConfirm = true)
         }
     }
 
@@ -219,9 +253,17 @@ class PreviewViewModel(
             val entry = "- $title ($year)"
             val header = "RATING: $newRating"
             val lines = content.lines().filter { it.trim() != entry }.toMutableList()
-            val headerIdx = lines.indexOfFirst { it.trim() == header }
+            val headerIdx = lines.indexOfFirst { it.trim().startsWith(header) }
             if (headerIdx >= 0) {
-                lines.add(headerIdx + 1, entry)
+                // Insert at end of this section (just before the next blank line or RATING header)
+                var insertIdx = headerIdx + 1
+                while (insertIdx < lines.size &&
+                    lines[insertIdx].isNotBlank() &&
+                    !lines[insertIdx].trim().startsWith("RATING:")
+                ) {
+                    insertIdx++
+                }
+                lines.add(insertIdx, entry)
             } else {
                 if (lines.isNotEmpty() && lines.last().isNotBlank()) lines.add("")
                 lines.add(header)

@@ -16,4 +16,7 @@ interface StarDao {
 
     @Query("SELECT tmdbId FROM stars")
     suspend fun getAll(): List<Int>
+
+    @Query("SELECT * FROM stars")
+    suspend fun getAllEntities(): List<StarEntity>
 }

@@ -157,6 +157,7 @@ fun PreviewScreen(
                 is PreviewUiState.Loaded -> {
                     LoadedContent(
                         state = state,
+                        onStarTap = viewModel::onStarTap,
                         modifier = Modifier.fillMaxSize()
                     )
                 }
@@ -168,6 +169,7 @@ fun PreviewScreen(
 @Composable
 private fun LoadedContent(
     state: PreviewUiState.Loaded,
+    onStarTap: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val title = state.title
@@ -218,21 +220,22 @@ private fun LoadedContent(
                         contentScale = ContentScale.FillWidth,
                         modifier = Modifier.fillMaxWidth()
                     )
-                    // Bookmark overlay — top-right; no action until wishlist is implemented
+                    // Wishlist star — top-right of poster; double-tap to add/remove
                     Box(
                         modifier = Modifier
                             .align(Alignment.TopEnd)
                             .padding(8.dp)
                             .size(44.dp)
                             .clip(CircleShape)
-                            .background(Color.Black.copy(alpha = 0.6f)),
+                            .background(Color.Black.copy(alpha = 0.6f))
+                            .clickable { onStarTap() },
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            imageVector = if (state.rating != null) Icons.Filled.Bookmark
+                            imageVector = if (state.isStarred) Icons.Filled.Bookmark
                                           else Icons.Outlined.BookmarkBorder,
                             contentDescription = "Add to wishlist",
-                            tint = Color.White,
+                            tint = if (state.starPendingConfirm) Color.Yellow else Color.White,
                             modifier = Modifier.size(26.dp)
                         )
                     }

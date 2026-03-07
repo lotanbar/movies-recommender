@@ -1,6 +1,8 @@
 package com.moviesrecommender
 
 import android.app.Application
+import com.moviesrecommender.data.local.AppDatabase
+import com.moviesrecommender.data.local.LocalStorageService
 import com.moviesrecommender.data.local.SharedPrefsTokenStore
 import com.moviesrecommender.data.remote.anthropic.AnthropicAuthManager
 import com.moviesrecommender.data.remote.anthropic.AnthropicService
@@ -35,6 +37,10 @@ class MoviesRecommenderApp : Application() {
 
     val wikidataApiClient: OkHttpWikidataApiClient by lazy {
         OkHttpWikidataApiClient()
+    }
+
+    val localStorageService: LocalStorageService by lazy {
+        LocalStorageService(AppDatabase.getInstance(this).starDao())
     }
 
     /** In-memory list cache shared between Recommend/Rate flows and PreviewScreen. */
