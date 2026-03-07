@@ -10,6 +10,7 @@ import com.moviesrecommender.data.remote.dropbox.DropboxService
 import com.moviesrecommender.data.remote.dropbox.OkHttpDropboxApiClient
 import com.moviesrecommender.data.remote.dropbox.TokenStore
 import com.moviesrecommender.data.remote.tmdb.OkHttpTmdbApiClient
+import com.moviesrecommender.data.remote.tmdb.Title
 import com.moviesrecommender.data.remote.tmdb.TmdbService
 import com.moviesrecommender.data.remote.wikidata.OkHttpWikidataApiClient
 import com.moviesrecommender.util.ToastManager
@@ -38,6 +39,24 @@ class MoviesRecommenderApp : Application() {
 
     /** In-memory list cache shared between Recommend/Rate flows and PreviewScreen. */
     var cachedListContent: String? = null
+
+    /** Titles shown during the current recommend session that the user skipped — cleared on fresh entry. */
+    val recommendSkippedTitles: MutableSet<String> = mutableSetOf()
+
+    /** Ordered queue of (tmdbId, mediaType) for the current recommend batch. */
+    var recommendQueue: List<Pair<Int, String>> = emptyList()
+
+    /** Index of the title currently being shown in the recommend flow. */
+    var recommendQueueIndex: Int = 0
+
+    /** Pre-fetched Title objects from Rate flow — keyed by TMDB ID for instant PreviewScreen loading. */
+    val cachedTitles: MutableMap<Int, Title> = mutableMapOf()
+
+    /** Ordered queue of (tmdbId, mediaType) for the current rate batch. */
+    var rateQueue: List<Pair<Int, String>> = emptyList()
+
+    /** Index of the title currently being shown in the rate flow. */
+    var rateQueueIndex: Int = 0
 
     /** True while the Rate flow is active — suppresses per-title Dropbox uploads in PreviewViewModel. */
     var rateMode: Boolean = false

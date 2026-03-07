@@ -126,7 +126,7 @@ class SearchViewModel : ViewModel() {
             val normalized = titleToFind.lowercase().trim()
             for (line in listContent.lines()) {
                 val trimmed = line.trim()
-                val ratingMatch = Regex("^RATING:\\s*(\\d+)$").find(trimmed)
+                val ratingMatch = Regex("^RATING:\\s*(\\d+)").find(trimmed)
                 if (ratingMatch != null) {
                     currentRating = ratingMatch.groupValues[1].toIntOrNull()
                     continue

@@ -123,6 +123,19 @@ class PreviewViewModel(
         if (loaded.rating == 0) deleteFromList(loaded) else saveRating(loaded, 0)
     }
 
+    fun skip() {
+        val loaded = _uiState.value as? PreviewUiState.Loaded ?: return
+        val t = loaded.title
+        app.recommendSkippedTitles.add("${t.title} (${t.year})")
+        viewModelScope.launch { advanceRecommendQueue() }
+    }
+
+    private suspend fun advanceRecommendQueue() {
+        val nextIndex = app.recommendQueueIndex + 1
+        app.recommendQueueIndex = nextIndex
+        _autoAdvance.emit(app.recommendQueue.getOrNull(nextIndex))
+    }
+
     fun setRating(stars: Int) {
         val loaded = _uiState.value as? PreviewUiState.Loaded ?: return
         saveRating(loaded, stars)
@@ -133,26 +146,39 @@ class PreviewViewModel(
         val updated = updateListRating(listContent ?: "", t.title, t.year, newRating)
         listContent = updated
         app.cachedListContent = updated
-        if (source == "rate") {
-            _uiState.value = loaded.copy(rating = newRating, isUploading = true, uploadError = false)
-            viewModelScope.launch {
-                val uploadResult = app.dropboxService.uploadList(updated)
-                val failed = uploadResult is DropboxResult.Failure
-                if (failed) Log.e("Dropbox", "Upload failed in rate flow: ${(uploadResult as DropboxResult.Failure).error}")
-                val current = _uiState.value as? PreviewUiState.Loaded
-                if (current != null) _uiState.value = current.copy(isUploading = false, uploadError = failed)
-                val nextIndex = app.rateQueueIndex + 1
-                app.rateQueueIndex = nextIndex
-                val next = app.rateQueue.getOrNull(nextIndex)
-                _autoAdvance.emit(next)
+        when (source) {
+            "rate" -> {
+                _uiState.value = loaded.copy(rating = newRating, isUploading = true, uploadError = false)
+                viewModelScope.launch {
+                    val uploadResult = app.dropboxService.uploadList(updated)
+                    val failed = uploadResult is DropboxResult.Failure
+                    if (failed) Log.e("Dropbox", "Upload failed in rate flow: ${(uploadResult as DropboxResult.Failure).error}")
+                    val current = _uiState.value as? PreviewUiState.Loaded
+                    if (current != null) _uiState.value = current.copy(isUploading = false, uploadError = failed)
+                    val nextIndex = app.rateQueueIndex + 1
+                    app.rateQueueIndex = nextIndex
+                    _autoAdvance.emit(app.rateQueue.getOrNull(nextIndex))
+                }
             }
-        } else {
-            _uiState.value = loaded.copy(rating = newRating, isUploading = true, uploadError = false)
-            viewModelScope.launch {
-                val result = dropboxService.uploadList(updated)
-                if (result is DropboxResult.Failure) Log.e("Dropbox", "Upload failed: ${result.error}")
-                val current = _uiState.value as? PreviewUiState.Loaded ?: return@launch
-                _uiState.value = current.copy(isUploading = false, uploadError = result is DropboxResult.Failure)
+            "recommend" -> {
+                _uiState.value = loaded.copy(rating = newRating, isUploading = true, uploadError = false)
+                viewModelScope.launch {
+                    val uploadResult = app.dropboxService.uploadList(updated)
+                    val failed = uploadResult is DropboxResult.Failure
+                    if (failed) Log.e("Dropbox", "Upload failed in recommend flow: ${(uploadResult as DropboxResult.Failure).error}")
+                    val current = _uiState.value as? PreviewUiState.Loaded
+                    if (current != null) _uiState.value = current.copy(isUploading = false, uploadError = failed)
+                    advanceRecommendQueue()
+                }
+            }
+            else -> {
+                _uiState.value = loaded.copy(rating = newRating, isUploading = true, uploadError = false)
+                viewModelScope.launch {
+                    val result = dropboxService.uploadList(updated)
+                    if (result is DropboxResult.Failure) Log.e("Dropbox", "Upload failed: ${result.error}")
+                    val current = _uiState.value as? PreviewUiState.Loaded ?: return@launch
+                    _uiState.value = current.copy(isUploading = false, uploadError = result is DropboxResult.Failure)
+                }
             }
         }
     }
@@ -162,15 +188,28 @@ class PreviewViewModel(
         val updated = removeEntry(listContent ?: "", t.title, t.year)
         listContent = updated
         app.cachedListContent = updated
-        if (source == "rate") {
-            _uiState.value = loaded.copy(rating = null, isUploading = false, uploadError = false)
-        } else {
-            _uiState.value = loaded.copy(rating = null, isUploading = true, uploadError = false)
-            viewModelScope.launch {
-                val result = dropboxService.uploadList(updated)
-                if (result is DropboxResult.Failure) Log.e("Dropbox", "Upload failed: ${result.error}")
-                val current = _uiState.value as? PreviewUiState.Loaded ?: return@launch
-                _uiState.value = current.copy(isUploading = false, uploadError = result is DropboxResult.Failure)
+        when (source) {
+            "rate" -> {
+                _uiState.value = loaded.copy(rating = null, isUploading = false, uploadError = false)
+            }
+            "recommend" -> {
+                _uiState.value = loaded.copy(rating = null, isUploading = true, uploadError = false)
+                viewModelScope.launch {
+                    val result = dropboxService.uploadList(updated)
+                    if (result is DropboxResult.Failure) Log.e("Dropbox", "Upload failed: ${result.error}")
+                    val current = _uiState.value as? PreviewUiState.Loaded ?: return@launch
+                    _uiState.value = current.copy(isUploading = false, uploadError = result is DropboxResult.Failure)
+                    advanceRecommendQueue()
+                }
+            }
+            else -> {
+                _uiState.value = loaded.copy(rating = null, isUploading = true, uploadError = false)
+                viewModelScope.launch {
+                    val result = dropboxService.uploadList(updated)
+                    if (result is DropboxResult.Failure) Log.e("Dropbox", "Upload failed: ${result.error}")
+                    val current = _uiState.value as? PreviewUiState.Loaded ?: return@launch
+                    _uiState.value = current.copy(isUploading = false, uploadError = result is DropboxResult.Failure)
+                }
             }
         }
     }

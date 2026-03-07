@@ -23,11 +23,11 @@ class AnthropicService(
         }
     }
 
-    /** Send a multi-turn conversation, with optional system prompt. */
-    suspend fun sendMessages(messages: List<Pair<String, String>>, system: String? = null): AnthropicResult<String> {
+    /** Send a multi-turn conversation, with optional system prompt. Pass modelOverride to use a different model than stored. */
+    suspend fun sendMessages(messages: List<Pair<String, String>>, system: String? = null, modelOverride: String? = null): AnthropicResult<String> {
         val apiKey = authManager.getApiKey()
             ?: return AnthropicResult.Failure(AnthropicError.ApiKeyMissing)
-        val modelId = authManager.getModelId()
+        val modelId = modelOverride ?: authManager.getModelId()
             ?: return AnthropicResult.Failure(AnthropicError.ModelNotSelected)
         return try {
             AnthropicResult.Success(apiClient.sendMessages(apiKey, modelId, messages, system).trim())

@@ -111,13 +111,21 @@ class OkHttpAnthropicApiClient(
         throw AnthropicApiException.ServerError("No text block in response")
     }
 
-    private fun execute(apiKey: String, request: Request): String {
+    private fun execute(apiKey: String, request: Request, retryCount: Int = 0): String {
         return try {
             val response = httpClient.newCall(request).execute()
             val body = response.body?.string() ?: ""
             when {
                 response.code in 200..299 -> body
                 response.code == 401 -> throw AnthropicApiException.Unauthorized()
+                response.code == 429 -> {
+                    if (retryCount < 3) {
+                        Thread.sleep((1L shl retryCount) * 1000L) // 1s, 2s, 4s
+                        execute(apiKey, request, retryCount + 1)
+                    } else {
+                        throw AnthropicApiException.ServerError("Rate limit exceeded — please try again shortly.")
+                    }
+                }
                 else -> throw AnthropicApiException.ServerError("HTTP ${response.code}: $body")
             }
         } catch (e: AnthropicApiException) {

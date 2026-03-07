@@ -32,7 +32,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.outlined.BookmarkBorder
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -80,10 +83,35 @@ fun PreviewScreen(
     )
     val uiState by viewModel.uiState.collectAsState()
 
-    // Rate mode: after the user taps a rating, auto-pop back to RateScreen to advance the queue
+    // Rate mode: after the user taps a rating, navigate directly to next title or pop to RateScreen when batch done
     if (source == "rate") {
         LaunchedEffect(Unit) {
-            viewModel.autoAdvance.collect { navController.popBackStack() }
+            viewModel.autoAdvance.collect { next ->
+                if (next != null) {
+                    // Replace current preview with the next title — no RateScreen flash
+                    navController.navigate(Screen.Preview.createRoute(next.first, next.second, "rate")) {
+                        popUpTo(Screen.Preview.createRoute(tmdbId, mediaType, "rate")) { inclusive = true }
+                    }
+                } else {
+                    // Batch done — pop back to RateScreen to start the next batch
+                    navController.popBackStack()
+                }
+            }
+        }
+    }
+
+    // Recommend mode: after rating/skip, navigate to next item or pop back to RecommendScreen for new batch
+    if (source == "recommend") {
+        LaunchedEffect(Unit) {
+            viewModel.autoAdvance.collect { next ->
+                if (next != null) {
+                    navController.navigate(Screen.Preview.createRoute(next.first, next.second, "recommend")) {
+                        popUpTo(Screen.Preview.createRoute(tmdbId, mediaType, "recommend")) { inclusive = true }
+                    }
+                } else {
+                    navController.popBackStack()
+                }
+            }
         }
     }
 
@@ -102,8 +130,10 @@ fun PreviewScreen(
                     rating = loaded.rating,
                     isUploading = loaded.isUploading,
                     uploadError = loaded.uploadError,
-                    onToggleInList = viewModel::toggleInList,
-                    onSetRating = viewModel::setRating
+                    showSkip = source == "recommend" && loaded.rating == 0,
+                    onSetNotSeen = viewModel::setNotSeen,
+                    onSetRating = viewModel::setRating,
+                    onSkip = viewModel::skip
                 )
             }
         }
@@ -175,16 +205,38 @@ private fun LoadedContent(
                 .weight(1f)
         ) { page ->
             when (page) {
-                0 -> AsyncImage(
-                    model = title.posterUrl(500),
-                    contentDescription = title.title,
-                    contentScale = ContentScale.FillWidth,
+                0 -> Box(
                     modifier = Modifier
                         .padding(horizontal = 16.dp, vertical = 8.dp)
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(8.dp))
                         .background(MaterialTheme.colorScheme.surfaceVariant)
-                )
+                ) {
+                    AsyncImage(
+                        model = title.posterUrl(500),
+                        contentDescription = title.title,
+                        contentScale = ContentScale.FillWidth,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    // Bookmark overlay — top-right; no action until wishlist is implemented
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(8.dp)
+                            .size(44.dp)
+                            .clip(CircleShape)
+                            .background(Color.Black.copy(alpha = 0.6f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = if (state.rating != null) Icons.Filled.Bookmark
+                                          else Icons.Outlined.BookmarkBorder,
+                            contentDescription = "Add to wishlist",
+                            tint = Color.White,
+                            modifier = Modifier.size(26.dp)
+                        )
+                    }
+                }
                 else -> DetailsPage(
                     state = state,
                     onOpenUrl = ::openUrl,
@@ -484,8 +536,10 @@ private fun RatingBottomBar(
     rating: Int?,
     isUploading: Boolean,
     uploadError: Boolean,
-    onToggleInList: () -> Unit,
-    onSetRating: (Int) -> Unit
+    showSkip: Boolean = false,
+    onSetNotSeen: () -> Unit,
+    onSetRating: (Int) -> Unit,
+    onSkip: () -> Unit = {}
 ) {
     Surface(tonalElevation = 8.dp) {
         Column(
@@ -501,17 +555,26 @@ private fun RatingBottomBar(
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                RatingCircleButton(
-                    isActive = rating != null,
-                    onClick = onToggleInList
-                ) {
-                    Icon(
-                        imageVector = if (rating != null) Icons.Filled.Bookmark
-                                      else Icons.Outlined.BookmarkBorder,
-                        contentDescription = if (rating != null) "Remove from wishlist"
-                                             else "Add to wishlist",
-                        modifier = Modifier.size(22.dp)
-                    )
+                if (showSkip) {
+                    RatingCircleButton(isActive = false, onClick = onSkip) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                            contentDescription = "Skip",
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                } else {
+                    RatingCircleButton(
+                        isActive = rating == 0,
+                        onClick = onSetNotSeen
+                    ) {
+                        Icon(
+                            imageVector = if (rating == 0) Icons.Filled.VisibilityOff
+                                          else Icons.Outlined.VisibilityOff,
+                            contentDescription = "Mark as not seen",
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
                 }
                 (1..4).forEach { n ->
                     RatingCircleButton(

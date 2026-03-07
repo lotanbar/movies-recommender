@@ -84,14 +84,26 @@ class RateViewModel : ViewModel() {
                 .substringAfter("================================================================================")
                 .trimStart('\r', '\n')
 
+            // Build a flat title list so Claude has an unambiguous blacklist to check against
+            val existingTitles = listBody.lines()
+                .filter { it.trimStart().startsWith("- ") }
+                .map { it.trimStart('-', ' ').trim() }
+                .filter { it.isNotBlank() }
+                .joinToString("\n")
+
             val systemPrompt =
                 "You MUST respond with exactly 50 movie or show titles and years, one per line, " +
                 "numbered 1–50, in this exact format:\n" +
                 "1. Title (Year)\n2. Title (Year)\n...\n50. Title (Year)\n" +
                 "No explanation, no markdown, no other text. Just 50 numbered lines."
 
+            val userMessage =
+                "$listContent\n\nrate\n\n" +
+                "IMPORTANT — the following titles are already in my list. Do NOT suggest any of them:\n" +
+                existingTitles
+
             val result = app.anthropicService.sendMessages(
-                listOf("user" to "$listContent\n\nrate"),
+                listOf("user" to userMessage),
                 systemPrompt
             )
             if (result is AnthropicResult.Failure) {

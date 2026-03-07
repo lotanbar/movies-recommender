@@ -68,6 +68,7 @@ fun RateScreen(navController: NavHostController) {
             .background(MaterialTheme.colorScheme.background)
     ) {
         when (val state = uiState) {
+            is RateUiState.InProgress -> { /* navigating between titles — nothing to show */ }
             is RateUiState.Loading -> {
                 Column(
                     modifier = Modifier.align(Alignment.Center),

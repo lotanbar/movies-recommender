@@ -101,7 +101,7 @@ fun RecommendScreen(navController: NavHostController) {
                         )
                     }
                     Spacer(Modifier.height(4.dp))
-                    Button(onClick = { viewModel.startRecommend() }) {
+                    Button(onClick = { viewModel.startBatch() }) {
                         Text("Retry")
                     }
                 }

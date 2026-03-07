@@ -105,7 +105,12 @@ class FakeAnthropicApiClient : AnthropicApiClient {
         return models
     }
 
-    override suspend fun sendMessage(apiKey: String, modelId: String, prompt: String): String {
+    override suspend fun sendMessage(apiKey: String, modelId: String, prompt: String, system: String?): String {
+        sendException?.let { throw it }
+        return sendResponse
+    }
+
+    override suspend fun sendMessages(apiKey: String, modelId: String, messages: List<Pair<String, String>>, system: String?): String {
         sendException?.let { throw it }
         return sendResponse
     }

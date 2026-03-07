@@ -8,8 +8,10 @@ import com.moviesrecommender.data.remote.anthropic.AnthropicError
 import com.moviesrecommender.data.remote.anthropic.AnthropicResult
 import com.moviesrecommender.data.remote.dropbox.DropboxError
 import com.moviesrecommender.data.remote.dropbox.DropboxResult
-import com.moviesrecommender.data.remote.tmdb.TmdbError
 import com.moviesrecommender.data.remote.tmdb.TmdbResult
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -36,12 +38,17 @@ class RecommendViewModel : ViewModel() {
     private var hasNavigatedToPreview = false
 
     init {
-        startRecommend()
+        app.recommendSkippedTitles.clear()
+        app.recommendQueue = emptyList()
+        app.recommendQueueIndex = 0
+        startBatch()
     }
 
-    fun startRecommend() {
+    fun startBatch() {
         viewModelScope.launch {
             _uiState.value = RecommendUiState.Loading
+            app.recommendQueue = emptyList()
+            app.recommendQueueIndex = 0
 
             val listContent = app.cachedListContent
                 ?: when (val r = app.dropboxService.downloadList()) {
@@ -54,91 +61,120 @@ class RecommendViewModel : ViewModel() {
 
             Log.d("Recommend", "listContent length=${listContent.length}")
 
-            // The file already contains full instructions for Claude.
-            // We add only a strict output-format enforcement in the system prompt.
-            val systemPrompt = "You MUST respond with ONLY the movie or show title and year, " +
-                "in this exact format: Title (Year)\n" +
-                "No explanation, no markdown, no other text. Just: Title (Year)"
+            val ratedTitles = buildRatedTitlesBlacklist(listContent)
+            val skippedSection = if (app.recommendSkippedTitles.isNotEmpty())
+                "\nAlso do NOT suggest these already-shown titles:\n${app.recommendSkippedTitles.joinToString("\n")}"
+            else ""
 
-            val listBody = listContent
-                .substringAfter("================================================================================")
-                .trimStart('\r', '\n')
-            val ratedSection = listBody.substringBefore("RATING: 0")
+            val systemPrompt =
+                "You MUST respond with exactly 20 movie or show titles to recommend, " +
+                "numbered 1-20, in this exact format:\n" +
+                "1. Title (Year)\n2. Title (Year)\n...\n20. Title (Year)\n" +
+                "No explanation, no markdown, no other text. Just 20 numbered lines."
 
-            val messages = mutableListOf("user" to "$listBody\n\nrecommend")
-            var lastResponse = ""
-            for (attempt in 0 until 5) {
-                val result = app.anthropicService.sendMessages(messages, systemPrompt)
-                if (result is AnthropicResult.Failure) {
-                    _uiState.value = RecommendUiState.Error(result.error.toMessage())
-                    return@launch
-                }
-                lastResponse = (result as AnthropicResult.Success).value
-                Log.d("Recommend", "Attempt $attempt response: [$lastResponse]")
-                messages.add("assistant" to lastResponse)
+            val userMessage =
+                "$listContent\n\nrecommend\n\n" +
+                "IMPORTANT - the following titles are already rated. Do NOT suggest any of them:\n" +
+                ratedTitles + skippedSection
 
-                val parsed = parseTitleYear(lastResponse)
-                Log.d("Recommend", "Parsed: $parsed")
-                if (parsed == null) {
-                    messages.add("user" to "Provide only the title and year in the format: Title (Year)")
-                    continue
-                }
+            val result = app.anthropicService.sendMessages(listOf("user" to userMessage), systemPrompt)
+            if (result is AnthropicResult.Failure) {
+                _uiState.value = RecommendUiState.Error(result.error.toMessage())
+                return@launch
+            }
+            val response = (result as AnthropicResult.Success).value
+            Log.d("Recommend", "Response: [$response]")
 
-                if (isTitleInRatedList(parsed.first, parsed.second, ratedSection)) {
-                    Log.d("Recommend", "${parsed.first} (${parsed.second}) is already in the list, asking for another")
-                    messages.add("user" to "\"${parsed.first} (${parsed.second})\" is already in your list. Please recommend a different title.")
-                    continue
-                }
+            val candidates = parseRecommendTitles(response)
+                .filterNot { (t, y) -> isTitleInRatedList(t, y, listContent) }
+                .filterNot { (t, y) -> "$t ($y)" in app.recommendSkippedTitles }
+                .distinctBy { it.first.lowercase() }
 
-                val tmdbResult = app.tmdbService.fetchMetadata(parsed.first, parsed.second)
-                Log.d("Recommend", "TMDB result for ${parsed.first} (${parsed.second}): $tmdbResult")
-                when (tmdbResult) {
-                    is TmdbResult.Success -> {
-                        val t = tmdbResult.value
-                        hasNavigatedToPreview = true
-                        _navigateToPreview.emit(Pair(t.id, t.mediaType.name))
-                        return@launch
-                    }
-                    is TmdbResult.Failure -> {
-                        _uiState.value = RecommendUiState.Error(
-                            message = tmdbResult.error.toMessage(),
-                            debugInfo = "Claude said: \"$lastResponse\"\nParsed: title=\"${parsed.first}\" year=${parsed.second}"
-                        )
-                        return@launch
-                    }
-                }
+            Log.d("Recommend", "${candidates.size} valid candidates after filtering")
+
+            if (candidates.isEmpty()) {
+                _uiState.value = RecommendUiState.Error(
+                    "Could not find new recommendations.",
+                    "All suggestions were already in your list or previously shown."
+                )
+                return@launch
             }
 
-            _uiState.value = RecommendUiState.Error(
-                message = "Could not get a valid recommendation from Claude.",
-                debugInfo = "Last response: [$lastResponse]"
-            )
+            val tmdbResults = coroutineScope {
+                candidates.map { (title, year) ->
+                    async { app.tmdbService.fetchMetadata(title, year) }
+                }.awaitAll()
+            }
+
+            val successes = tmdbResults.zip(candidates)
+                .mapNotNull { (r, _) -> (r as? TmdbResult.Success)?.value }
+            val failCount = tmdbResults.count { it is TmdbResult.Failure }
+            if (failCount > 0) Log.w("Recommend", "$failCount titles not found on TMDB, skipped")
+
+            if (successes.isEmpty()) {
+                _uiState.value = RecommendUiState.Error("None of the recommendations were found on TMDB.")
+                return@launch
+            }
+
+            successes.forEach { app.cachedTitles[it.id] = it }
+            app.recommendQueue = successes.map { Pair(it.id, it.mediaType.name) }
+            app.recommendQueueIndex = 0
+            // Remember all shown titles so next batch never re-suggests them
+            successes.forEach { app.recommendSkippedTitles.add("${it.title} (${it.year})") }
+
+            hasNavigatedToPreview = true
+            _navigateToPreview.emit(app.recommendQueue[0])
         }
     }
 
     fun onScreenResumed() {
         if (hasNavigatedToPreview) {
             hasNavigatedToPreview = false
-            startRecommend()
+            startBatch()
         }
     }
 
     companion object {
-        private val EXACT_REGEX = Regex("""^(.+?)\s*\((\d{4})\)\s*$""")
+private val NUMBERED_REGEX = Regex("""^\d{1,2}\.\s+(.+?)\s*\((\d{4})\)\s*$""")
 
-        fun parseTitleYear(response: String): Pair<String, Int>? {
-            val clean = response.trim().replace(Regex("""[*_]+"""), "")
-            val match = EXACT_REGEX.matchEntire(clean) ?: return null
-            val title = match.groupValues[1].trim()
-            val year = match.groupValues[2].toIntOrNull() ?: return null
-            return Pair(title, year)
+        fun parseRecommendTitles(response: String): List<Pair<String, Int>> =
+            response.lines().mapNotNull { line ->
+                val clean = line.trim().replace(Regex("""[*_]+"""), "")
+                val match = NUMBERED_REGEX.matchEntire(clean) ?: return@mapNotNull null
+                val title = match.groupValues[1].trim()
+                val year = match.groupValues[2].toIntOrNull() ?: return@mapNotNull null
+                Pair(title, year)
+            }
+
+        fun isTitleInRatedList(title: String, year: Int, listContent: String): Boolean {
+            val titleLower = title.lowercase().trim()
+            var currentRating = -1
+            for (line in listContent.lines()) {
+                val trimmed = line.trim()
+                val ratingMatch = Regex("^RATING:\\s*(\\d+)").find(trimmed)
+                if (ratingMatch != null) {
+                    currentRating = ratingMatch.groupValues[1].toIntOrNull() ?: -1
+                } else if (currentRating in 1..4 && trimmed.startsWith("-")) {
+                    val cleaned = trimmed.trimStart('-', ' ').trim().lowercase()
+                    if (cleaned == "$titleLower ($year)" || cleaned.startsWith("$titleLower (")) return true
+                }
+            }
+            return false
         }
 
-        fun isTitleInRatedList(title: String, year: Int, ratedSection: String): Boolean {
-            val needle = "$title ($year)".lowercase()
-            return ratedSection.lines().any { line ->
-                line.trimStart('-', ' ').lowercase().startsWith(needle)
+        fun buildRatedTitlesBlacklist(listContent: String): String {
+            val titles = mutableListOf<String>()
+            var currentRating = -1
+            for (line in listContent.lines()) {
+                val trimmed = line.trim()
+                val ratingMatch = Regex("^RATING:\\s*(\\d+)").find(trimmed)
+                if (ratingMatch != null) {
+                    currentRating = ratingMatch.groupValues[1].toIntOrNull() ?: -1
+                } else if (currentRating in 1..4 && trimmed.startsWith("-")) {
+                    titles.add(trimmed.trimStart('-', ' ').trim())
+                }
             }
+            return titles.joinToString("\n")
         }
     }
 }
@@ -158,11 +194,4 @@ private fun DropboxError.toMessage(): String = when (this) {
     DropboxError.StorageFull -> "Dropbox storage is full."
     DropboxError.RateLimit -> "Too many requests. Try again shortly."
     is DropboxError.Unknown -> "Download failed: $message"
-}
-
-private fun TmdbError.toMessage(): String = when (this) {
-    TmdbError.NoInternet -> "Search unavailable: No internet connection."
-    TmdbError.InvalidApiKey -> "Invalid TMDB API key. Please go to Setup."
-    TmdbError.NotFound -> "Title not found on TMDB."
-    is TmdbError.ApiError -> "TMDB error: $message"
 }
