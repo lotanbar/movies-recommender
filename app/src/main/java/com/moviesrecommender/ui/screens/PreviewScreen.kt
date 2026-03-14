@@ -3,8 +3,10 @@ package com.moviesrecommender.ui.screens
 import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -20,6 +22,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -30,12 +33,21 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Bookmark
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.VisibilityOff
-import androidx.compose.material.icons.outlined.BookmarkBorder
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
-import androidx.compose.material.icons.outlined.VisibilityOff
+import androidx.compose.material.icons.filled.Movie
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Tv
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.collect
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -44,11 +56,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -59,9 +66,17 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -70,6 +85,7 @@ import com.moviesrecommender.navigation.Screen
 import coil.compose.AsyncImage
 import com.moviesrecommender.R
 import com.moviesrecommender.data.remote.tmdb.MediaType
+import com.moviesrecommender.util.ToastManager
 
 @Composable
 fun PreviewScreen(
@@ -130,10 +146,7 @@ fun PreviewScreen(
                     rating = loaded.rating,
                     isUploading = loaded.isUploading,
                     uploadError = loaded.uploadError,
-                    showSkip = source == "recommend" && loaded.rating == 0,
-                    onSetNotSeen = viewModel::setNotSeen,
-                    onSetRating = viewModel::setRating,
-                    onSkip = viewModel::skip
+                    onSetRating = viewModel::setRating
                 )
             }
         }
@@ -157,7 +170,11 @@ fun PreviewScreen(
                 is PreviewUiState.Loaded -> {
                     LoadedContent(
                         state = state,
-                        onStarTap = viewModel::onStarTap,
+                        source = source,
+                        hasPrevious = viewModel::hasPrevious,
+                        onNavigateBack = viewModel::navigateBack,
+                        onDoubleTap = viewModel::onDoubleTap,
+                        onSkipOrNotSeen = viewModel::onSkipOrNotSeen,
                         modifier = Modifier.fillMaxSize()
                     )
                 }
@@ -166,17 +183,44 @@ fun PreviewScreen(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun LoadedContent(
     state: PreviewUiState.Loaded,
-    onStarTap: () -> Unit,
+    source: String,
+    hasPrevious: () -> Boolean,
+    onNavigateBack: () -> Unit,
+    onDoubleTap: () -> Unit,
+    onSkipOrNotSeen: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val title = state.title
     val context = LocalContext.current
+    val clipboardManager = LocalClipboardManager.current
     fun openUrl(url: String) = context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
 
-    val pagerState = rememberPagerState(pageCount = { 2 })
+    val allPosters = remember(title.id) { title.allPosterUrls(500) }
+    var thumbnailIndex by remember(title.id) { mutableStateOf(0) }
+    var showDetails by remember(title.id) { mutableStateOf(false) }
+    var trailerScrolling by remember { mutableStateOf(false) }
+
+    // recommend/rate: pages = [back(0) | poster(1) | skip(2)], start at 1
+    // search: pages = [poster(0) | details(1)], start at 0
+    val showBack = source == "recommend" || source == "rate"
+    val pagerState = rememberPagerState(
+        initialPage = if (showBack) 1 else 0,
+        pageCount = { if (showBack) 3 else 2 }
+    )
+
+    LaunchedEffect(pagerState) {
+        snapshotFlow { pagerState.settledPage }.collect { page ->
+            if (!showBack) return@collect
+            when (page) {
+                0 -> if (hasPrevious()) onNavigateBack() else pagerState.animateScrollToPage(1)
+                2 -> { onSkipOrNotSeen(); pagerState.animateScrollToPage(1) }
+            }
+        }
+    }
 
     Column(modifier = modifier) {
         // Title fixed at top
@@ -186,86 +230,187 @@ private fun LoadedContent(
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Text(
-                text = title.title,
+                text = buildAnnotatedString {
+                    pushStyle(SpanStyle(fontWeight = FontWeight.Bold))
+                    append(title.title)
+                    pop()
+                    append(" (${title.year})")
+                },
                 style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.weight(1f)
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable {
+                        clipboardManager.setText(AnnotatedString(title.title))
+                        ToastManager.show("Copied to clipboard")
+                    }
             )
-            Text(
-                text = title.year.toString(),
-                style = MaterialTheme.typography.headlineSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+            title.runtime?.let { mins ->
+                val h = mins / 60
+                val m = mins % 60
+                Text(
+                    text = if (h > 0) "${h}h ${m}m" else "${m}m",
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Icon(
+                imageVector = if (title.mediaType == MediaType.TV) Icons.Filled.Tv else Icons.Filled.Movie,
+                contentDescription = if (title.mediaType == MediaType.TV) "TV" else "Film",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(22.dp)
             )
-            MediaTypePill(title.mediaType)
         }
 
-        // Pager fills all remaining space
+        // recommend/rate layout: [back-trigger | poster | skip-trigger]
+        // search layout:         [poster | details]
         HorizontalPager(
             state = pagerState,
+            userScrollEnabled = showBack && !trailerScrolling,
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
         ) { page ->
-            when (page) {
-                0 -> Box(
-                    modifier = Modifier
-                        .padding(horizontal = 16.dp, vertical = 8.dp)
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(MaterialTheme.colorScheme.surfaceVariant)
-                ) {
-                    AsyncImage(
-                        model = title.posterUrl(500),
-                        contentDescription = title.title,
-                        contentScale = ContentScale.FillWidth,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    // Wishlist star — top-right of poster; double-tap to add/remove
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(8.dp)
-                            .size(44.dp)
-                            .clip(CircleShape)
-                            .background(Color.Black.copy(alpha = 0.6f))
-                            .clickable { onStarTap() },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = if (state.isStarred) Icons.Filled.Bookmark
-                                          else Icons.Outlined.BookmarkBorder,
-                            contentDescription = "Add to wishlist",
-                            tint = if (state.starPendingConfirm) Color.Yellow else Color.White,
-                            modifier = Modifier.size(26.dp)
-                        )
-                    }
-                }
-                else -> DetailsPage(
+            when {
+                showBack && page == 0 -> BackTriggerPage(modifier = Modifier.fillMaxSize())
+                showBack && page == 2 -> SkipTriggerPage(modifier = Modifier.fillMaxSize())
+                !showBack && page == 1 -> DetailsPage(
                     state = state,
                     onOpenUrl = ::openUrl,
+                    onTrailerScrollChange = { trailerScrolling = it },
                     modifier = Modifier.fillMaxSize()
                 )
+                else -> {
+                    // Poster page (with optional details overlay)
+                    Box(
+                        modifier = Modifier
+                            .padding(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 12.dp)
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                            .combinedClickable(
+                                indication = null,
+                                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                                onClick = {
+                                    if (!showDetails && allPosters.size > 1)
+                                        thumbnailIndex = (thumbnailIndex + 1) % allPosters.size
+                                },
+                                onDoubleClick = { showDetails = !showDetails },
+                                onLongClick = onDoubleTap
+                            )
+                    ) {
+                        if (showDetails) {
+                            DetailsPage(
+                                state = state,
+                                onOpenUrl = ::openUrl,
+                                onTrailerScrollChange = { trailerScrolling = it },
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        } else {
+                            AsyncImage(
+                                model = allPosters.getOrNull(thumbnailIndex) ?: title.posterUrl(500),
+                                contentDescription = title.title,
+                                contentScale = ContentScale.FillWidth,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            if (allPosters.size > 1) {
+                                Row(
+                                    modifier = Modifier
+                                        .align(Alignment.BottomCenter)
+                                        .padding(bottom = 10.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    allPosters.indices.forEach { i ->
+                                        Box(
+                                            modifier = Modifier
+                                                .size(if (i == thumbnailIndex) 8.dp else 6.dp)
+                                                .clip(CircleShape)
+                                                .background(
+                                                    Color.White.copy(alpha = if (i == thumbnailIndex) 0.9f else 0.4f)
+                                                )
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun BackTriggerPage(modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                contentDescription = "Previous title",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                modifier = Modifier.size(64.dp)
+            )
+            Text(
+                "Previous title",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+            )
+        }
+    }
+}
+
+@Composable
+private fun SkipTriggerPage(modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                contentDescription = "Skip",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                modifier = Modifier.size(64.dp)
+            )
+            Text(
+                "Not watched",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+            )
+        }
+    }
+}
+
 @Composable
 private fun DetailsPage(
     state: PreviewUiState.Loaded,
     onOpenUrl: (String) -> Unit,
+    onTrailerScrollChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val title = state.title
-    val query = Uri.encode("${title.title} ${title.year}")
 
     Column(
         modifier = modifier
-            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .padding(horizontal = 12.dp, vertical = 12.dp)
             .clip(RoundedCornerShape(8.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant)
-            .padding(16.dp)
+            // no inner padding — trailer fills flush to card edges
     ) {
         // Scrollable content
         val scrollState = rememberScrollState()
@@ -290,21 +435,34 @@ private fun DetailsPage(
                     }
                 }
                 .verticalScroll(scrollState),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             // Trailers
             if (title.trailerKeys.isEmpty()) {
                 Text(
                     "No Trailer Found",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = Color.White.copy(alpha = 0.6f)
+                    color = Color.White.copy(alpha = 0.6f),
+                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp)
                 )
             } else {
                 val trailerState = rememberLazyListState()
+                LaunchedEffect(trailerState.isScrollInProgress) {
+                    onTrailerScrollChange(trailerState.isScrollInProgress)
+                }
+                // Consume all horizontal scroll/fling so it never leaks to the parent pager
+                val consumeHorizontal = remember {
+                    object : NestedScrollConnection {
+                        override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource) =
+                            Offset(available.x, 0f)
+                        override suspend fun onPostFling(consumed: Velocity, available: Velocity) =
+                            Velocity(available.x, 0f)
+                    }
+                }
                 LazyRow(
                     state = trailerState,
                     flingBehavior = rememberSnapFlingBehavior(trailerState),
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth().nestedScroll(consumeHorizontal)
                 ) {
                     items(title.trailerKeys) { key ->
                         Box(
@@ -340,28 +498,55 @@ private fun DetailsPage(
                 }
             }
 
-            // Genres
-            if (title.genres.isNotEmpty()) {
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    title.genres.forEach { genre ->
-                        AssistChip(
-                            onClick = {},
-                            label = { Text(genre, style = MaterialTheme.typography.bodySmall) }
-                        )
-                    }
+            // Text content with horizontal padding
+            Column(
+                modifier = Modifier.padding(start = 4.dp, end = 4.dp, bottom = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+
+            // Genres: max 3 tags AND max 3 total words, + Wikipedia icon
+            val displayGenres = buildList {
+                var wordCount = 0
+                for (genre in title.genres) {
+                    if (size >= 3) break
+                    val words = genre.trim().split("\\s+".toRegex()).size
+                    if (wordCount + words > 3) break
+                    add(genre)
+                    wordCount += words
+                }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                displayGenres.forEach { genre ->
+                    AssistChip(
+                        onClick = {},
+                        label = { Text(genre, style = MaterialTheme.typography.bodySmall) }
+                    )
+                }
+                Spacer(modifier = Modifier.weight(1f))
+                // Wikipedia icon stuck to right
+                if (!state.wikipediaReady) {
+                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                } else if (state.wikipediaUrl != null) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_wikipedia),
+                        contentDescription = "Wikipedia",
+                        tint = Color.Unspecified,
+                        modifier = Modifier
+                            .size(32.dp)
+                            .clickable { onOpenUrl(state.wikipediaUrl) }
+                    )
                 }
             }
 
-            // Cast
-            if (title.leadActors.isNotEmpty()) {
-                Text(
-                    "Starring: ${title.leadActors.joinToString(", ")}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = Color.White
-                )
+            // Overview (max 2 sentences)
+            title.overview?.takeIf { it.isNotBlank() }?.let { overview ->
+                val sentences = overview.split(Regex("(?<=[.!?])\\s+"))
+                val short = sentences.take(2).joinToString(" ")
+                Text(short, style = MaterialTheme.typography.bodyMedium, color = Color.White)
             }
 
             // Awards
@@ -390,93 +575,8 @@ private fun DetailsPage(
                 }
             }
 
-            // Overview
-            title.overview?.takeIf { it.isNotBlank() }?.let { overview ->
-                Text(overview, style = MaterialTheme.typography.bodyMedium, color = Color.White)
-            }
+            } // end padded text content Column
 
-            // Crew & production
-            val prodLine = listOfNotNull(
-                title.productionCompany,
-                title.country?.let { countryCodeToName(it) }
-            ).joinToString(" · ")
-            if (prodLine.isNotEmpty()) {
-                Text(prodLine, style = MaterialTheme.typography.bodyMedium, color = Color.White)
-            }
-
-            title.director?.let {
-                Text("Director: $it", style = MaterialTheme.typography.bodyMedium, color = Color.White)
-            }
-            title.writer?.let {
-                Text("Writer: $it", style = MaterialTheme.typography.bodyMedium, color = Color.White)
-            }
-            if (title.producers.isNotEmpty()) {
-                Text(
-                    "Producer: ${title.producers.joinToString(", ")}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = Color.White
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // Buttons pinned at bottom
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            ActionButton(
-                modifier = Modifier.weight(1f),
-                label = "YouTube",
-                onClick = { onOpenUrl("https://www.youtube.com/results?search_query=$query") }
-            ) {
-                Icon(
-                    painter = painterResource(R.drawable.ic_youtube),
-                    contentDescription = null,
-                    tint = Color.Unspecified,
-                    modifier = Modifier.size(28.dp)
-                )
-            }
-
-            ActionButton(
-                modifier = Modifier.weight(1f),
-                label = "Wikipedia",
-                onClick = { state.wikipediaUrl?.let { onOpenUrl(it) } },
-                enabled = state.wikipediaReady && state.wikipediaUrl != null
-            ) {
-                if (!state.wikipediaReady) {
-                    CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                } else {
-                    Icon(
-                        painter = painterResource(R.drawable.ic_wikipedia),
-                        contentDescription = null,
-                        tint = Color.Unspecified,
-                        modifier = Modifier
-                            .size(28.dp)
-                            .alpha(if (state.wikipediaUrl != null) 1f else 0.35f)
-                    )
-                }
-            }
-
-            ActionButton(
-                modifier = Modifier.weight(1f),
-                label = "IMDb",
-                onClick = { title.imdbId?.let { onOpenUrl("https://www.imdb.com/title/$it") } },
-                enabled = title.imdbId != null
-            ) {
-                Box(
-                    modifier = Modifier.height(28.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "IMDb",
-                        fontWeight = FontWeight.ExtraBold,
-                        fontSize = 14.sp,
-                        color = Color(0xFFF5C518).copy(alpha = if (title.imdbId != null) 1f else 0.35f)
-                    )
-                }
-            }
         }
     }
 }
@@ -519,16 +619,16 @@ private fun ActionButton(
 }
 
 @Composable
-private fun MediaTypePill(mediaType: MediaType) {
+private fun MediaTypePill(mediaType: MediaType, small: Boolean = false) {
     Box(
         modifier = Modifier
             .clip(RoundedCornerShape(6.dp))
             .background(MaterialTheme.colorScheme.secondaryContainer)
-            .padding(horizontal = 8.dp, vertical = 3.dp)
+            .padding(horizontal = if (small) 8.dp else 8.dp, vertical = if (small) 6.dp else 3.dp)
     ) {
         Text(
             text = if (mediaType == MediaType.TV) "TV" else "Film",
-            style = MaterialTheme.typography.headlineSmall,
+            style = if (small) MaterialTheme.typography.bodySmall else MaterialTheme.typography.headlineSmall,
             color = MaterialTheme.colorScheme.onSecondaryContainer
         )
     }
@@ -539,10 +639,7 @@ private fun RatingBottomBar(
     rating: Int?,
     isUploading: Boolean,
     uploadError: Boolean,
-    showSkip: Boolean = false,
-    onSetNotSeen: () -> Unit,
-    onSetRating: (Int) -> Unit,
-    onSkip: () -> Unit = {}
+    onSetRating: (Int) -> Unit
 ) {
     Surface(tonalElevation = 8.dp) {
         Column(
@@ -558,27 +655,6 @@ private fun RatingBottomBar(
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                if (showSkip) {
-                    RatingCircleButton(isActive = false, onClick = onSkip) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                            contentDescription = "Skip",
-                            modifier = Modifier.size(22.dp)
-                        )
-                    }
-                } else {
-                    RatingCircleButton(
-                        isActive = rating == 0,
-                        onClick = onSetNotSeen
-                    ) {
-                        Icon(
-                            imageVector = if (rating == 0) Icons.Filled.VisibilityOff
-                                          else Icons.Outlined.VisibilityOff,
-                            contentDescription = "Mark as not seen",
-                            modifier = Modifier.size(22.dp)
-                        )
-                    }
-                }
                 (1..4).forEach { n ->
                     RatingCircleButton(
                         isActive = rating == n,
