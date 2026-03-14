@@ -61,7 +61,7 @@ class OkHttpTmdbApiClient(
         withContext(Dispatchers.IO) {
             val endpoint = if (mediaType == MediaType.MOVIE) "movie" else "tv"
             val body = executeGet(
-                "https://api.themoviedb.org/3/$endpoint/$id?api_key=$apiKey&append_to_response=credits,external_ids,videos"
+                "https://api.themoviedb.org/3/$endpoint/$id?api_key=$apiKey&append_to_response=credits,external_ids,videos,images"
             )
             val obj = JSONObject(body)
 
@@ -126,11 +126,26 @@ class OkHttpTmdbApiClient(
                 }
             }
 
+            val mainPosterPath = obj.optString("poster_path").takeIf { it.isNotEmpty() }
+            val runtime = obj.optInt("runtime", 0).takeIf { it > 0 }
+                ?: obj.optJSONArray("episode_run_time")?.optInt(0)?.takeIf { it > 0 }
+            val extraPosterPaths = buildList {
+                val posters = obj.optJSONObject("images")?.optJSONArray("posters")
+                if (posters != null) {
+                    for (i in 0 until posters.length()) {
+                        if (size >= 3) break
+                        val path = posters.getJSONObject(i).optString("file_path")
+                            .takeIf { it.isNotEmpty() } ?: continue
+                        if (path != mainPosterPath) add(path)
+                    }
+                }
+            }
+
             Title(
                 id = id,
                 title = title,
                 year = year,
-                posterPath = obj.optString("poster_path").takeIf { it.isNotEmpty() },
+                posterPath = mainPosterPath,
                 overview = obj.optString("overview").takeIf { it.isNotEmpty() },
                 genres = genres,
                 country = country,
@@ -142,7 +157,9 @@ class OkHttpTmdbApiClient(
                     ?: obj.optJSONObject("external_ids")?.optString("imdb_id")?.takeIf { it.isNotEmpty() },
                 trailerKeys = trailerKeys,
                 writer = writer,
-                producers = producers
+                producers = producers,
+                extraPosterPaths = extraPosterPaths,
+                runtime = runtime
             )
         }
 

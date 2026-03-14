@@ -55,7 +55,7 @@ class AnthropicService(
         val modelId = authManager.getModelId()
             ?: return AnthropicResult.Failure(AnthropicError.ModelNotSelected)
         return try {
-            val response = apiClient.sendMessage(apiKey, modelId, "$listContent\n\n$mode")
+            val response = apiClient.sendMessage(apiKey, modelId, "$mode\n\n$listContent")
             AnthropicResult.Success(response.trim())
         } catch (e: AnthropicApiException) {
             AnthropicResult.Failure(e.toAnthropicError())

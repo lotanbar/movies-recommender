@@ -1,6 +1,7 @@
 package com.moviesrecommender.data.remote.anthropic
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -111,7 +112,7 @@ class OkHttpAnthropicApiClient(
         throw AnthropicApiException.ServerError("No text block in response")
     }
 
-    private fun execute(apiKey: String, request: Request, retryCount: Int = 0): String {
+    private suspend fun execute(apiKey: String, request: Request, retryCount: Int = 0): String {
         return try {
             val response = httpClient.newCall(request).execute()
             val body = response.body?.string() ?: ""
@@ -120,7 +121,7 @@ class OkHttpAnthropicApiClient(
                 response.code == 401 -> throw AnthropicApiException.Unauthorized()
                 response.code == 429 -> {
                     if (retryCount < 3) {
-                        Thread.sleep((1L shl retryCount) * 1000L) // 1s, 2s, 4s
+                        delay((1L shl retryCount) * 1000L) // 1s, 2s, 4s
                         execute(apiKey, request, retryCount + 1)
                     } else {
                         throw AnthropicApiException.ServerError("Rate limit exceeded — please try again shortly.")
