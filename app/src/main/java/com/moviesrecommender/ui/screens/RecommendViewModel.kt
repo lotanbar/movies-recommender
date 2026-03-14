@@ -61,23 +61,7 @@ class RecommendViewModel : ViewModel() {
 
             Log.d("Recommend", "listContent length=${listContent.length}")
 
-            val ratedTitles = buildRatedTitlesBlacklist(listContent)
-            val skippedSection = if (app.recommendSkippedTitles.isNotEmpty())
-                "\nAlso do NOT suggest these already-shown titles:\n${app.recommendSkippedTitles.joinToString("\n")}"
-            else ""
-
-            val systemPrompt =
-                "You MUST respond with exactly 20 movie or show titles to recommend, " +
-                "numbered 1-20, in this exact format:\n" +
-                "1. Title (Year)\n2. Title (Year)\n...\n20. Title (Year)\n" +
-                "No explanation, no markdown, no other text. Just 20 numbered lines."
-
-            val userMessage =
-                "$listContent\n\nrecommend\n\n" +
-                "IMPORTANT - the following titles are already rated. Do NOT suggest any of them:\n" +
-                ratedTitles + skippedSection
-
-            val result = app.anthropicService.sendMessages(listOf("user" to userMessage), systemPrompt)
+            val result = app.anthropicService.sendPrompt("recommend 10 titles", listContent)
             if (result is AnthropicResult.Failure) {
                 _uiState.value = RecommendUiState.Error(result.error.toMessage())
                 return@launch
@@ -108,6 +92,8 @@ class RecommendViewModel : ViewModel() {
 
             val successes = tmdbResults.zip(candidates)
                 .mapNotNull { (r, _) -> (r as? TmdbResult.Success)?.value }
+                .filter { it.trailerKeys.isNotEmpty() }
+                .filter { it.runtime == null || it.runtime <= 150 }
             val failCount = tmdbResults.count { it is TmdbResult.Failure }
             if (failCount > 0) Log.w("Recommend", "$failCount titles not found on TMDB, skipped")
 

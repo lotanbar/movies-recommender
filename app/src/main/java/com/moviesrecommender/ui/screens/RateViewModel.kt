@@ -54,7 +54,7 @@ class RateViewModel : ViewModel() {
 
     override fun onCleared() {
         super.onCleared()
-        if (app.rateMode) {
+        if (app.rateMode && !isBusy) {
             app.rateMode = false
             app.cachedTitles.clear()
             val content = app.cachedListContent ?: return
@@ -80,32 +80,7 @@ class RateViewModel : ViewModel() {
 
             Log.d("Rate", "listContent length=${listContent.length}")
 
-            val listBody = listContent
-                .substringAfter("================================================================================")
-                .trimStart('\r', '\n')
-
-            // Build a flat title list so Claude has an unambiguous blacklist to check against
-            val existingTitles = listBody.lines()
-                .filter { it.trimStart().startsWith("- ") }
-                .map { it.trimStart('-', ' ').trim() }
-                .filter { it.isNotBlank() }
-                .joinToString("\n")
-
-            val systemPrompt =
-                "You MUST respond with exactly 50 movie or show titles and years, one per line, " +
-                "numbered 1–50, in this exact format:\n" +
-                "1. Title (Year)\n2. Title (Year)\n...\n50. Title (Year)\n" +
-                "No explanation, no markdown, no other text. Just 50 numbered lines."
-
-            val userMessage =
-                "$listContent\n\nrate\n\n" +
-                "IMPORTANT — the following titles are already in my list. Do NOT suggest any of them:\n" +
-                existingTitles
-
-            val result = app.anthropicService.sendMessages(
-                listOf("user" to userMessage),
-                systemPrompt
-            )
+            val result = app.anthropicService.sendPrompt("rate 10 titles", listContent)
             if (result is AnthropicResult.Failure) {
                 _uiState.value = RateUiState.Error(result.error.toMessage())
                 return@launch
@@ -114,7 +89,7 @@ class RateViewModel : ViewModel() {
             Log.d("Rate", "Response: [$response]")
 
             val candidates = parseRateTitles(response)
-                .filterNot { (t, _) -> isTitleInList(t, 0, listBody) }
+                .filterNot { (t, _) -> isTitleInList(t, 0, listContent) }
                 .distinctBy { it.first.lowercase() }
             Log.d("Rate", "${candidates.size} unique new candidates")
 
@@ -133,6 +108,8 @@ class RateViewModel : ViewModel() {
 
             val successes = tmdbResults.zip(candidates)
                 .mapNotNull { (r, _) -> (r as? TmdbResult.Success)?.value }
+                .filter { it.trailerKeys.isNotEmpty() }
+                .filter { it.runtime == null || it.runtime <= 150 }
             val failCount = tmdbResults.count { it is TmdbResult.Failure }
             if (failCount > 0) Log.w("Rate", "$failCount titles not found on TMDB, skipped")
 

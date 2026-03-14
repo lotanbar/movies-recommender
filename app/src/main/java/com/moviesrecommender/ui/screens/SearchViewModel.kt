@@ -4,9 +4,13 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.moviesrecommender.MoviesRecommenderApp
 import com.moviesrecommender.data.remote.dropbox.DropboxResult
+import com.moviesrecommender.data.remote.tmdb.MediaType
 import com.moviesrecommender.data.remote.tmdb.Title
 import com.moviesrecommender.data.remote.tmdb.TmdbResult
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -72,7 +76,7 @@ class SearchViewModel : ViewModel() {
                 when (val result = tmdbService.search(activeQuery, nextPage)) {
                     is TmdbResult.Success -> {
                         currentPage = nextPage
-                        val newItems = result.value.titles.map { it.withRating() }
+                        val newItems = fetchDetailsAndFilter(result.value.titles)
                         buffer.addAll(newItems)
                         displayedCount = minOf(displayedCount + LOAD_MORE_COUNT, buffer.size)
                         _results.value = buffer.take(displayedCount)
@@ -95,7 +99,8 @@ class SearchViewModel : ViewModel() {
             is TmdbResult.Success -> {
                 currentPage = 1
                 totalPages = result.value.totalPages
-                buffer.addAll(result.value.titles.map { it.withRating() })
+                val items = fetchDetailsAndFilter(result.value.titles)
+                buffer.addAll(items)
                 displayedCount = minOf(INITIAL_COUNT, buffer.size)
                 _results.value = buffer.take(displayedCount)
             }
@@ -103,6 +108,25 @@ class SearchViewModel : ViewModel() {
         }
         _isSearching.value = false
     }
+
+    private suspend fun fetchDetailsAndFilter(titles: List<Title>): List<TitleWithRating> =
+        coroutineScope {
+            titles.map { basic ->
+                async {
+                    val mediaType = if (basic.mediaType.name == "TV") MediaType.TV else MediaType.MOVIE
+                    when (val r = tmdbService.fetchDetails(basic.id, mediaType)) {
+                        is TmdbResult.Success -> {
+                            val full = r.value
+                            if (full.trailerKeys.isNotEmpty()) {
+                                app.cachedTitles[full.id] = full
+                                full.withRating()
+                            } else null
+                        }
+                        is TmdbResult.Failure -> null
+                    }
+                }
+            }.awaitAll().filterNotNull()
+        }
 
     private fun resetResults() {
         buffer.clear()

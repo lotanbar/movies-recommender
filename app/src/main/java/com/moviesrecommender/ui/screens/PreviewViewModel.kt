@@ -27,7 +27,6 @@ sealed class PreviewUiState {
         val title: Title,
         val rating: Int?,
         val isStarred: Boolean = false,
-        val starPendingConfirm: Boolean = false,
         val wikipediaUrl: String? = null,
         val wikipediaReady: Boolean = false,
         val awards: List<Award> = emptyList(),
@@ -125,25 +124,45 @@ class PreviewViewModel(
         }
     }
 
-    fun onStarTap() {
-        val loaded = _uiState.value as? PreviewUiState.Loaded ?: return
-        if (loaded.starPendingConfirm) {
-            _uiState.value = loaded.copy(starPendingConfirm = false)
-            viewModelScope.launch {
-                if (loaded.isStarred) {
-                    app.localStorageService.removeStar(tmdbId)
-                    val current = _uiState.value as? PreviewUiState.Loaded ?: return@launch
-                    _uiState.value = current.copy(isStarred = false)
-                } else {
-                    app.localStorageService.addStar(tmdbId, loaded.title.mediaType.name)
-                    val current = _uiState.value as? PreviewUiState.Loaded ?: return@launch
-                    _uiState.value = current.copy(isStarred = true)
+    fun hasPrevious(): Boolean = when (source) {
+        "rate" -> app.rateQueueIndex > 0
+        "recommend" -> app.recommendQueueIndex > 0
+        else -> false
+    }
+
+    fun navigateBack() {
+        viewModelScope.launch {
+            when (source) {
+                "rate" -> {
+                    val idx = app.rateQueueIndex - 1
+                    if (idx < 0) return@launch
+                    app.rateQueueIndex = idx
+                    _autoAdvance.emit(app.rateQueue.getOrNull(idx))
+                }
+                "recommend" -> {
+                    val idx = app.recommendQueueIndex - 1
+                    if (idx < 0) return@launch
+                    app.recommendQueueIndex = idx
+                    _autoAdvance.emit(app.recommendQueue.getOrNull(idx))
                 }
             }
-        } else {
-            val action = if (loaded.isStarred) "remove from" else "add to"
-            ToastManager.show("Tap again to $action wishlist.")
-            _uiState.value = loaded.copy(starPendingConfirm = true)
+        }
+    }
+
+    fun onDoubleTap() {
+        val loaded = _uiState.value as? PreviewUiState.Loaded ?: return
+        viewModelScope.launch {
+            if (loaded.isStarred) {
+                app.localStorageService.removeStar(tmdbId)
+                val current = _uiState.value as? PreviewUiState.Loaded ?: return@launch
+                _uiState.value = current.copy(isStarred = false)
+                ToastManager.show("Removed from wishlist.")
+            } else {
+                app.localStorageService.addStar(tmdbId, loaded.title.mediaType.name)
+                val current = _uiState.value as? PreviewUiState.Loaded ?: return@launch
+                _uiState.value = current.copy(isStarred = true)
+                ToastManager.show("Added to wishlist.")
+            }
         }
     }
 
@@ -155,6 +174,12 @@ class PreviewViewModel(
     fun setNotSeen() {
         val loaded = _uiState.value as? PreviewUiState.Loaded ?: return
         if (loaded.rating == 0) deleteFromList(loaded) else saveRating(loaded, 0)
+    }
+
+    fun onSkipOrNotSeen() = when (source) {
+        "recommend" -> skip()
+        "rate" -> setNotSeen()
+        else -> Unit
     }
 
     fun skip() {
