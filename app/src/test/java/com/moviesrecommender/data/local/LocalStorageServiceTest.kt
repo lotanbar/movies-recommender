@@ -55,9 +55,10 @@ class LocalStorageServiceTest {
 }
 
 private class FakeStarDao : StarDao {
-    private val stars = mutableSetOf<Int>()
+    private val stars = mutableMapOf<Int, StarEntity>()
 
-    override suspend fun insert(star: StarEntity) { stars.add(star.tmdbId) }
-    override suspend fun delete(star: StarEntity) { stars.remove(star.tmdbId) }
-    override suspend fun getAll(): List<Int> = stars.toList()
+    override suspend fun insert(star: StarEntity) { stars[star.tmdbId] = star }
+    override suspend fun deleteById(tmdbId: Int) { stars.remove(tmdbId) }
+    override suspend fun getAll(): List<Int> = stars.keys.toList()
+    override suspend fun getAllEntities(): List<StarEntity> = stars.values.toList()
 }

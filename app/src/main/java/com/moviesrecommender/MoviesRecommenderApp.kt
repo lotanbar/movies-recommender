@@ -56,7 +56,7 @@ class MoviesRecommenderApp : Application() {
     var recommendQueueIndex: Int = 0
 
     /** Pre-fetched Title objects from Rate flow — keyed by TMDB ID for instant PreviewScreen loading. */
-    val cachedTitles: MutableMap<Int, Title> = mutableMapOf()
+    val cachedTitles: MutableMap<Int, Title> = java.util.concurrent.ConcurrentHashMap()
 
     /** Ordered queue of (tmdbId, mediaType) for the current rate batch. */
     var rateQueue: List<Pair<Int, String>> = emptyList()
@@ -65,7 +65,7 @@ class MoviesRecommenderApp : Application() {
     var rateQueueIndex: Int = 0
 
     /** True while the Rate flow is active — suppresses per-title Dropbox uploads in PreviewViewModel. */
-    var rateMode: Boolean = false
+    @Volatile var rateMode: Boolean = false
 
     companion object {
         lateinit var instance: MoviesRecommenderApp
