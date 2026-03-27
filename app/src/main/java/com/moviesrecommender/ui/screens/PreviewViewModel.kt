@@ -1,6 +1,5 @@
 package com.moviesrecommender.ui.screens
 
-import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -54,9 +53,9 @@ class PreviewViewModel(
     private val _uiState = MutableStateFlow<PreviewUiState>(PreviewUiState.Loading)
     val uiState: StateFlow<PreviewUiState> = _uiState.asStateFlow()
 
-    // Emitted after rating in Rate mode:
-    // - non-null: navigate directly to next title (no RateScreen round-trip)
-    // - null: batch done, pop back to RateScreen to trigger next batch
+    // Emitted after rating/skip in Recommend mode:
+    // - non-null: navigate directly to next recommended title
+    // - null: recommend batch done
     private val _autoAdvance = MutableSharedFlow<Pair<Int, String>?>(extraBufferCapacity = 1)
     val autoAdvance: SharedFlow<Pair<Int, String>?> = _autoAdvance.asSharedFlow()
 
@@ -64,7 +63,7 @@ class PreviewViewModel(
         val preloaded = app.cachedTitles[tmdbId]
         val cachedList = app.cachedListContent
         if (preloaded != null && cachedList != null) {
-            // Rate flow: data is pre-fetched — go straight to Loaded, no network needed
+            // Data pre-fetched by Recommend flow — go straight to Loaded, no network needed.
             listContent = cachedList
             _uiState.value = PreviewUiState.Loaded(
                 title = preloaded,
@@ -99,7 +98,7 @@ class PreviewViewModel(
     private suspend fun load() = coroutineScope {
         val detailsDeferred = async { tmdbService.fetchDetails(tmdbId, mediaType) }
         val isStarredDeferred = async { app.localStorageService.isStarred(tmdbId) }
-        // Use cached list from Recommend/Rate flow to avoid redundant download
+        // Use cached list from Recommend flow to avoid redundant download.
         val cached = app.cachedListContent
         if (cached != null) {
             listContent = cached
@@ -124,27 +123,15 @@ class PreviewViewModel(
         }
     }
 
-    fun hasPrevious(): Boolean = when (source) {
-        "rate" -> app.rateQueueIndex > 0
-        "recommend" -> app.recommendQueueIndex > 0
-        else -> false
-    }
+    fun hasPrevious(): Boolean = source == "recommend" && app.recommendQueueIndex > 0
 
     fun navigateBack() {
         viewModelScope.launch {
-            when (source) {
-                "rate" -> {
-                    val idx = app.rateQueueIndex - 1
-                    if (idx < 0) return@launch
-                    app.rateQueueIndex = idx
-                    _autoAdvance.emit(app.rateQueue.getOrNull(idx))
-                }
-                "recommend" -> {
-                    val idx = app.recommendQueueIndex - 1
-                    if (idx < 0) return@launch
-                    app.recommendQueueIndex = idx
-                    _autoAdvance.emit(app.recommendQueue.getOrNull(idx))
-                }
+            if (source == "recommend") {
+                val idx = app.recommendQueueIndex - 1
+                if (idx < 0) return@launch
+                app.recommendQueueIndex = idx
+                _autoAdvance.emit(app.recommendQueue.getOrNull(idx))
             }
         }
     }
@@ -166,20 +153,8 @@ class PreviewViewModel(
         }
     }
 
-    fun toggleInList() {
-        val loaded = _uiState.value as? PreviewUiState.Loaded ?: return
-        if (loaded.rating == null) saveRating(loaded, 0) else deleteFromList(loaded)
-    }
-
-    fun setNotSeen() {
-        val loaded = _uiState.value as? PreviewUiState.Loaded ?: return
-        if (loaded.rating == 0) deleteFromList(loaded) else saveRating(loaded, 0)
-    }
-
-    fun onSkipOrNotSeen() = when (source) {
-        "recommend" -> skip()
-        "rate" -> setNotSeen()
-        else -> Unit
+    fun onSkip() {
+        if (source == "recommend") skip()
     }
 
     fun skip() {
@@ -200,31 +175,22 @@ class PreviewViewModel(
         saveRating(loaded, stars)
     }
 
+    fun clearRating() {
+        val loaded = _uiState.value as? PreviewUiState.Loaded ?: return
+        deleteFromList(loaded)
+    }
+
     private fun saveRating(loaded: PreviewUiState.Loaded, newRating: Int) {
         val t = loaded.title
         val updated = updateListRating(listContent ?: "", t.title, t.year, newRating)
         listContent = updated
         app.cachedListContent = updated
         when (source) {
-            "rate" -> {
-                _uiState.value = loaded.copy(rating = newRating, isUploading = true, uploadError = false)
-                viewModelScope.launch {
-                    val uploadResult = app.dropboxService.uploadList(updated)
-                    val failed = uploadResult is DropboxResult.Failure
-                    if (failed) Log.e("Dropbox", "Upload failed in rate flow: ${(uploadResult as DropboxResult.Failure).error}")
-                    val current = _uiState.value as? PreviewUiState.Loaded
-                    if (current != null) _uiState.value = current.copy(isUploading = false, uploadError = failed)
-                    val nextIndex = app.rateQueueIndex + 1
-                    app.rateQueueIndex = nextIndex
-                    _autoAdvance.emit(app.rateQueue.getOrNull(nextIndex))
-                }
-            }
             "recommend" -> {
                 _uiState.value = loaded.copy(rating = newRating, isUploading = true, uploadError = false)
                 viewModelScope.launch {
                     val uploadResult = app.dropboxService.uploadList(updated)
                     val failed = uploadResult is DropboxResult.Failure
-                    if (failed) Log.e("Dropbox", "Upload failed in recommend flow: ${(uploadResult as DropboxResult.Failure).error}")
                     val current = _uiState.value as? PreviewUiState.Loaded
                     if (current != null) _uiState.value = current.copy(isUploading = false, uploadError = failed)
                     advanceRecommendQueue()
@@ -234,7 +200,6 @@ class PreviewViewModel(
                 _uiState.value = loaded.copy(rating = newRating, isUploading = true, uploadError = false)
                 viewModelScope.launch {
                     val result = dropboxService.uploadList(updated)
-                    if (result is DropboxResult.Failure) Log.e("Dropbox", "Upload failed: ${result.error}")
                     val current = _uiState.value as? PreviewUiState.Loaded ?: return@launch
                     _uiState.value = current.copy(isUploading = false, uploadError = result is DropboxResult.Failure)
                 }
@@ -248,14 +213,10 @@ class PreviewViewModel(
         listContent = updated
         app.cachedListContent = updated
         when (source) {
-            "rate" -> {
-                _uiState.value = loaded.copy(rating = null, isUploading = false, uploadError = false)
-            }
             "recommend" -> {
                 _uiState.value = loaded.copy(rating = null, isUploading = true, uploadError = false)
                 viewModelScope.launch {
                     val result = dropboxService.uploadList(updated)
-                    if (result is DropboxResult.Failure) Log.e("Dropbox", "Upload failed: ${result.error}")
                     val current = _uiState.value as? PreviewUiState.Loaded ?: return@launch
                     _uiState.value = current.copy(isUploading = false, uploadError = result is DropboxResult.Failure)
                     advanceRecommendQueue()
@@ -265,7 +226,6 @@ class PreviewViewModel(
                 _uiState.value = loaded.copy(rating = null, isUploading = true, uploadError = false)
                 viewModelScope.launch {
                     val result = dropboxService.uploadList(updated)
-                    if (result is DropboxResult.Failure) Log.e("Dropbox", "Upload failed: ${result.error}")
                     val current = _uiState.value as? PreviewUiState.Loaded ?: return@launch
                     _uiState.value = current.copy(isUploading = false, uploadError = result is DropboxResult.Failure)
                 }

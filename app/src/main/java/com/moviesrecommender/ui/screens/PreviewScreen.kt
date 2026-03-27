@@ -99,23 +99,6 @@ fun PreviewScreen(
     )
     val uiState by viewModel.uiState.collectAsState()
 
-    // Rate mode: after the user taps a rating, navigate directly to next title or pop to RateScreen when batch done
-    if (source == "rate") {
-        LaunchedEffect(Unit) {
-            viewModel.autoAdvance.collect { next ->
-                if (next != null) {
-                    // Replace current preview with the next title — no RateScreen flash
-                    navController.navigate(Screen.Preview.createRoute(next.first, next.second, "rate")) {
-                        popUpTo(Screen.Preview.createRoute(tmdbId, mediaType, "rate")) { inclusive = true }
-                    }
-                } else {
-                    // Batch done — pop back to RateScreen to start the next batch
-                    navController.popBackStack()
-                }
-            }
-        }
-    }
-
     // Recommend mode: after rating/skip, navigate to next item or pop back to RecommendScreen for new batch
     if (source == "recommend") {
         LaunchedEffect(Unit) {
@@ -131,8 +114,8 @@ fun PreviewScreen(
         }
     }
 
-    // Recommend / Rate: back gesture goes straight to the main Actions screen
-    if (source == "recommend" || source == "rate") {
+    // Recommend: back gesture goes straight to the main Actions screen.
+    if (source == "recommend") {
         BackHandler {
             navController.popBackStack(Screen.Actions.route, inclusive = false)
         }
@@ -146,7 +129,8 @@ fun PreviewScreen(
                     rating = loaded.rating,
                     isUploading = loaded.isUploading,
                     uploadError = loaded.uploadError,
-                    onSetRating = viewModel::setRating
+                    onSetRating = viewModel::setRating,
+                    onClearRating = viewModel::clearRating
                 )
             }
         }
@@ -174,7 +158,7 @@ fun PreviewScreen(
                         hasPrevious = viewModel::hasPrevious,
                         onNavigateBack = viewModel::navigateBack,
                         onDoubleTap = viewModel::onDoubleTap,
-                        onSkipOrNotSeen = viewModel::onSkipOrNotSeen,
+                        onSkip = viewModel::onSkip,
                         modifier = Modifier.fillMaxSize()
                     )
                 }
@@ -191,7 +175,7 @@ private fun LoadedContent(
     hasPrevious: () -> Boolean,
     onNavigateBack: () -> Unit,
     onDoubleTap: () -> Unit,
-    onSkipOrNotSeen: () -> Unit,
+    onSkip: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val title = state.title
@@ -204,9 +188,9 @@ private fun LoadedContent(
     var showDetails by remember(title.id) { mutableStateOf(false) }
     var trailerScrolling by remember { mutableStateOf(false) }
 
-    // recommend/rate: pages = [back(0) | poster(1) | skip(2)], start at 1
+    // recommend: pages = [back(0) | poster(1) | skip(2)], start at 1
     // search: pages = [poster(0) | details(1)], start at 0
-    val showBack = source == "recommend" || source == "rate"
+    val showBack = source == "recommend"
     val pagerState = rememberPagerState(
         initialPage = if (showBack) 1 else 0,
         pageCount = { if (showBack) 3 else 2 }
@@ -217,7 +201,7 @@ private fun LoadedContent(
             if (!showBack) return@collect
             when (page) {
                 0 -> if (hasPrevious()) onNavigateBack() else pagerState.animateScrollToPage(1)
-                2 -> { onSkipOrNotSeen(); pagerState.animateScrollToPage(1) }
+                2 -> { onSkip(); pagerState.animateScrollToPage(1) }
             }
         }
     }
@@ -261,7 +245,7 @@ private fun LoadedContent(
             )
         }
 
-        // recommend/rate layout: [back-trigger | poster | skip-trigger]
+        // recommend layout: [back-trigger | poster | skip-trigger]
         // search layout:         [poster | details]
         HorizontalPager(
             state = pagerState,
@@ -639,7 +623,8 @@ private fun RatingBottomBar(
     rating: Int?,
     isUploading: Boolean,
     uploadError: Boolean,
-    onSetRating: (Int) -> Unit
+    onSetRating: (Int) -> Unit,
+    onClearRating: () -> Unit
 ) {
     Surface(tonalElevation = 8.dp) {
         Column(
@@ -658,7 +643,9 @@ private fun RatingBottomBar(
                 (1..4).forEach { n ->
                     RatingCircleButton(
                         isActive = rating == n,
-                        onClick = { onSetRating(if (rating == n) 0 else n) }
+                        onClick = {
+                            if (rating == n) onClearRating() else onSetRating(n)
+                        }
                     ) {
                         Text(text = "$n", style = MaterialTheme.typography.titleMedium)
                     }

@@ -70,6 +70,7 @@ class RecommendViewModel : ViewModel() {
             Log.d("Recommend", "Response: [$response]")
 
             val candidates = parseRecommendTitles(response)
+                .filter { (_, y) -> y >= 1985 }
                 .filterNot { (t, y) -> isTitleInRatedList(t, y, listContent) }
                 .filterNot { (t, y) -> "$t ($y)" in app.recommendSkippedTitles }
                 .distinctBy { it.first.lowercase() }
@@ -90,8 +91,11 @@ class RecommendViewModel : ViewModel() {
                 }.awaitAll()
             }
 
+            val wishlistedIds = app.localStorageService.getStars().toSet()
+
             val successes = tmdbResults.zip(candidates)
                 .mapNotNull { (r, _) -> (r as? TmdbResult.Success)?.value }
+                .filterNot { it.id in wishlistedIds }
                 .filter { it.trailerKeys.isNotEmpty() }
                 .filter { it.runtime == null || it.runtime <= 150 }
             val failCount = tmdbResults.count { it is TmdbResult.Failure }

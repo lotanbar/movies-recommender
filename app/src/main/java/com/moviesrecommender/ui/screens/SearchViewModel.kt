@@ -157,7 +157,9 @@ class SearchViewModel : ViewModel() {
                 }
                 if (trimmed.startsWith("- ")) {
                     val titlePart = trimmed.removePrefix("- ").substringBefore("(").trim().lowercase()
-                    if (titlePart == normalized) return currentRating
+                    if (titlePart == normalized) {
+                        return if (currentRating == 0) null else currentRating
+                    }
                 }
             }
             return null

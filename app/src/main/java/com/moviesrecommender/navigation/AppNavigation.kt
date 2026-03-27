@@ -9,7 +9,6 @@ import androidx.navigation.navArgument
 import com.moviesrecommender.AppViewModel
 import com.moviesrecommender.ui.screens.ActionsScreen
 import com.moviesrecommender.ui.screens.PreviewScreen
-import com.moviesrecommender.ui.screens.RateScreen
 import com.moviesrecommender.ui.screens.RecommendScreen
 import com.moviesrecommender.ui.screens.SearchScreen
 import com.moviesrecommender.ui.screens.SetupScreen
@@ -42,9 +41,6 @@ fun AppNavigation(navController: NavHostController, appViewModel: AppViewModel) 
         }
         composable(Screen.Recommend.route) {
             RecommendScreen(navController)
-        }
-        composable(Screen.Rate.route) {
-            RateScreen(navController)
         }
         composable(Screen.Wishlist.route) {
             WishlistScreen(navController)
