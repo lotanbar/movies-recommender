@@ -14,6 +14,7 @@ import com.moviesrecommender.data.remote.dropbox.TokenStore
 import com.moviesrecommender.data.remote.tmdb.OkHttpTmdbApiClient
 import com.moviesrecommender.data.remote.tmdb.Title
 import com.moviesrecommender.data.remote.tmdb.TmdbService
+import com.moviesrecommender.data.remote.omdb.OkHttpOmdbApiClient
 import com.moviesrecommender.data.remote.wikidata.OkHttpWikidataApiClient
 import com.moviesrecommender.util.ToastManager
 
@@ -32,11 +33,15 @@ class MoviesRecommenderApp : Application() {
     }
 
     val tmdbService: TmdbService by lazy {
-        TmdbService(tokenStore, OkHttpTmdbApiClient())
+        TmdbService(OkHttpTmdbApiClient())
     }
 
     val wikidataApiClient: OkHttpWikidataApiClient by lazy {
         OkHttpWikidataApiClient()
+    }
+
+    val omdbApiClient: OkHttpOmdbApiClient by lazy {
+        OkHttpOmdbApiClient()
     }
 
     val localStorageService: LocalStorageService by lazy {

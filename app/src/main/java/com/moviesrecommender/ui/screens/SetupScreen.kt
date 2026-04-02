@@ -45,14 +45,9 @@ fun SetupScreen(
     val dropboxAuthenticated by setupViewModel.dropboxAuthenticated.collectAsState()
     val listPath by setupViewModel.listPath.collectAsState()
     val listPathSet by setupViewModel.listPathSet.collectAsState()
-    val tmdbKeySet by setupViewModel.tmdbKeySet.collectAsState()
-    val claudeKeySet by setupViewModel.claudeKeySet.collectAsState()
     val isLoading by setupViewModel.isLoading.collectAsState()
 
     var showListPathDialog by remember { mutableStateOf(false) }
-    var showTmdbDialog by remember { mutableStateOf(false) }
-    var showClaudeDialog by remember { mutableStateOf(false) }
-
     var pendingClearLabel by remember { mutableStateOf("") }
     var pendingClearAction: (() -> Unit)? by remember { mutableStateOf(null) }
 
@@ -71,30 +66,6 @@ fun SetupScreen(
                 setupViewModel.saveListPath(path)
             },
             onDismiss = { showListPathDialog = false }
-        )
-    }
-
-    if (showTmdbDialog) {
-        InputDialog(
-            title = "TMDB API key",
-            placeholder = "Enter your TMDB API key",
-            onConfirm = { key ->
-                showTmdbDialog = false
-                setupViewModel.saveTmdbKey(key)
-            },
-            onDismiss = { showTmdbDialog = false }
-        )
-    }
-
-    if (showClaudeDialog) {
-        InputDialog(
-            title = "Claude API key",
-            placeholder = "sk-ant-...",
-            onConfirm = { key ->
-                showClaudeDialog = false
-                setupViewModel.saveClaudeKey(key)
-            },
-            onDismiss = { showClaudeDialog = false }
         )
     }
 
@@ -153,30 +124,6 @@ fun SetupScreen(
                 onClear = {
                     pendingClearLabel = "list file path"
                     pendingClearAction = { setupViewModel.clearListPath() }
-                }
-            )
-
-            Spacer(Modifier.height(12.dp))
-
-            CheckButton(
-                label = "Enter TMDB API key",
-                completed = tmdbKeySet,
-                onClick = { showTmdbDialog = true },
-                onClear = {
-                    pendingClearLabel = "TMDB API key"
-                    pendingClearAction = { setupViewModel.clearTmdbKey() }
-                }
-            )
-
-            Spacer(Modifier.height(12.dp))
-
-            CheckButton(
-                label = "Enter Claude API key",
-                completed = claudeKeySet,
-                onClick = { showClaudeDialog = true },
-                onClear = {
-                    pendingClearLabel = "Claude API key"
-                    pendingClearAction = { setupViewModel.clearClaudeKey() }
                 }
             )
 

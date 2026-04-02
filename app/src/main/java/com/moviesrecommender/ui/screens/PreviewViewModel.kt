@@ -26,8 +26,8 @@ sealed class PreviewUiState {
         val title: Title,
         val rating: Int?,
         val isStarred: Boolean = false,
-        val wikipediaUrl: String? = null,
-        val wikipediaReady: Boolean = false,
+        val shortPlot: String? = null,
+        val shortPlotReady: Boolean = false,
         val awards: List<Award> = emptyList(),
         val awardsReady: Boolean = false,
         val isUploading: Boolean = false,
@@ -69,7 +69,7 @@ class PreviewViewModel(
                 title = preloaded,
                 rating = SearchViewModel.parseRating(cachedList, preloaded.title)
             )
-            loadWikidataMetadata(preloaded)
+            loadMetadata(preloaded)
             viewModelScope.launch { loadStarStatus() }
         } else {
             viewModelScope.launch { load() }
@@ -82,11 +82,13 @@ class PreviewViewModel(
         _uiState.value = current.copy(isStarred = starred)
     }
 
-    private fun loadWikidataMetadata(title: Title) {
+    private fun loadMetadata(title: Title) {
         viewModelScope.launch {
-            val url = wikidataApiClient.getWikipediaUrl(tmdbId, mediaType == MediaType.MOVIE, title.title)
+            val plot = title.imdbId?.let {
+                app.omdbApiClient.fetchShortPlot(it, "f96ef8dd")
+            }
             val current = _uiState.value as? PreviewUiState.Loaded ?: return@launch
-            _uiState.value = current.copy(wikipediaUrl = url, wikipediaReady = true)
+            _uiState.value = current.copy(shortPlot = plot, shortPlotReady = true)
         }
         viewModelScope.launch {
             val awards = wikidataApiClient.getAwards(tmdbId, mediaType == MediaType.MOVIE)
@@ -117,7 +119,7 @@ class PreviewViewModel(
                     rating = listContent?.let { SearchViewModel.parseRating(it, t.title) },
                     isStarred = isStarredDeferred.await()
                 )
-                loadWikidataMetadata(t)
+                loadMetadata(t)
             }
             is TmdbResult.Failure -> _uiState.value = PreviewUiState.Error("Failed to load title")
         }

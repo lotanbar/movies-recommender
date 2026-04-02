@@ -68,7 +68,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -183,8 +182,6 @@ private fun LoadedContent(
     val clipboardManager = LocalClipboardManager.current
     fun openUrl(url: String) = context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
 
-    val allPosters = remember(title.id) { title.allPosterUrls(500) }
-    var thumbnailIndex by remember(title.id) { mutableStateOf(0) }
     var showDetails by remember(title.id) { mutableStateOf(false) }
     var trailerScrolling by remember { mutableStateOf(false) }
 
@@ -274,11 +271,8 @@ private fun LoadedContent(
                             .combinedClickable(
                                 indication = null,
                                 interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
-                                onClick = {
-                                    if (!showDetails && allPosters.size > 1)
-                                        thumbnailIndex = (thumbnailIndex + 1) % allPosters.size
-                                },
-                                onDoubleClick = { showDetails = !showDetails },
+                                onClick = { showDetails = !showDetails },
+                                onDoubleClick = onDoubleTap,
                                 onLongClick = onDoubleTap
                             )
                     ) {
@@ -291,31 +285,11 @@ private fun LoadedContent(
                             )
                         } else {
                             AsyncImage(
-                                model = allPosters.getOrNull(thumbnailIndex) ?: title.posterUrl(500),
+                                model = title.posterUrl(500),
                                 contentDescription = title.title,
                                 contentScale = ContentScale.FillWidth,
                                 modifier = Modifier.fillMaxWidth()
                             )
-                            if (allPosters.size > 1) {
-                                Row(
-                                    modifier = Modifier
-                                        .align(Alignment.BottomCenter)
-                                        .padding(bottom = 10.dp),
-                                    horizontalArrangement = Arrangement.spacedBy(5.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    allPosters.indices.forEach { i ->
-                                        Box(
-                                            modifier = Modifier
-                                                .size(if (i == thumbnailIndex) 8.dp else 6.dp)
-                                                .clip(CircleShape)
-                                                .background(
-                                                    Color.White.copy(alpha = if (i == thumbnailIndex) 0.9f else 0.4f)
-                                                )
-                                        )
-                                    }
-                                }
-                            }
                         }
                     }
                 }
@@ -510,27 +484,23 @@ private fun DetailsPage(
                         label = { Text(genre, style = MaterialTheme.typography.bodySmall) }
                     )
                 }
-                Spacer(modifier = Modifier.weight(1f))
-                // Wikipedia icon stuck to right
-                if (!state.wikipediaReady) {
-                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                } else if (state.wikipediaUrl != null) {
-                    Icon(
-                        painter = painterResource(R.drawable.ic_wikipedia),
-                        contentDescription = "Wikipedia",
-                        tint = Color.Unspecified,
-                        modifier = Modifier
-                            .size(32.dp)
-                            .clickable { onOpenUrl(state.wikipediaUrl) }
-                    )
-                }
             }
 
-            // Overview (max 2 sentences)
-            title.overview?.takeIf { it.isNotBlank() }?.let { overview ->
-                val sentences = overview.split(Regex("(?<=[.!?])\\s+"))
-                val short = sentences.take(2).joinToString(" ")
-                Text(short, style = MaterialTheme.typography.bodyMedium, color = Color.White)
+            // Short plot (OMDB) with fallback to first sentence of TMDB overview
+            when {
+                !state.shortPlotReady -> CircularProgressIndicator(
+                    modifier = Modifier.size(20.dp).align(Alignment.CenterHorizontally),
+                    strokeWidth = 2.dp
+                )
+                state.shortPlot != null -> Text(
+                    state.shortPlot,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color.White
+                )
+                else -> title.overview?.takeIf { it.isNotBlank() }?.let { overview ->
+                    val short = overview.split(Regex("(?<=[.!?])\\s+")).first()
+                    Text(short, style = MaterialTheme.typography.bodyMedium, color = Color.White)
+                }
             }
 
             // Awards
