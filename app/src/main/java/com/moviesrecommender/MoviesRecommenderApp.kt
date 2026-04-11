@@ -63,6 +63,9 @@ class MoviesRecommenderApp : Application() {
     /** Pre-fetched Title objects keyed by TMDB ID for instant PreviewScreen loading. */
     val cachedTitles: MutableMap<Int, Title> = java.util.concurrent.ConcurrentHashMap()
 
+    /** When true, the next recommend batch uses "recommend easy" instead of "recommend". */
+    var recommendEasy: Boolean = false
+
     companion object {
         lateinit var instance: MoviesRecommenderApp
             private set
