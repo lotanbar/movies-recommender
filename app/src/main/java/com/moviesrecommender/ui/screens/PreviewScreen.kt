@@ -236,8 +236,7 @@ private fun LoadedContent(
                                 indication = null,
                                 interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
                                 onClick = { title.imdbId?.let { openUrl("https://www.imdb.com/title/$it/") } },
-                                onDoubleClick = onDoubleTap,
-                                onLongClick = onDoubleTap
+                                onDoubleClick = onDoubleTap
                             )
                     ) {
                         AsyncImage(
