@@ -8,7 +8,6 @@ import com.moviesrecommender.data.remote.dropbox.DropboxResult
 import com.moviesrecommender.data.remote.tmdb.MediaType
 import com.moviesrecommender.data.remote.tmdb.Title
 import com.moviesrecommender.data.remote.tmdb.TmdbResult
-import com.moviesrecommender.data.remote.wikidata.Award
 import com.moviesrecommender.util.ToastManager
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -26,10 +25,6 @@ sealed class PreviewUiState {
         val title: Title,
         val rating: Int?,
         val isStarred: Boolean = false,
-        val shortPlot: String? = null,
-        val shortPlotReady: Boolean = false,
-        val awards: List<Award> = emptyList(),
-        val awardsReady: Boolean = false,
         val isUploading: Boolean = false,
         val uploadError: Boolean = false
     ) : PreviewUiState()
@@ -45,7 +40,6 @@ class PreviewViewModel(
     private val app = MoviesRecommenderApp.instance
     private val tmdbService = app.tmdbService
     private val dropboxService = app.dropboxService
-    private val wikidataApiClient = app.wikidataApiClient
     private val mediaType = if (mediaTypeStr == "TV") MediaType.TV else MediaType.MOVIE
 
     private var listContent: String? = null
@@ -69,7 +63,6 @@ class PreviewViewModel(
                 title = preloaded,
                 rating = SearchViewModel.parseRating(cachedList, preloaded.title)
             )
-            loadMetadata(preloaded)
             viewModelScope.launch { loadStarStatus() }
         } else {
             viewModelScope.launch { load() }
@@ -80,21 +73,6 @@ class PreviewViewModel(
         val starred = app.localStorageService.isStarred(tmdbId)
         val current = _uiState.value as? PreviewUiState.Loaded ?: return
         _uiState.value = current.copy(isStarred = starred)
-    }
-
-    private fun loadMetadata(title: Title) {
-        viewModelScope.launch {
-            val plot = title.imdbId?.let {
-                app.omdbApiClient.fetchShortPlot(it, "f96ef8dd")
-            }
-            val current = _uiState.value as? PreviewUiState.Loaded ?: return@launch
-            _uiState.value = current.copy(shortPlot = plot, shortPlotReady = true)
-        }
-        viewModelScope.launch {
-            val awards = wikidataApiClient.getAwards(tmdbId, mediaType == MediaType.MOVIE)
-            val current = _uiState.value as? PreviewUiState.Loaded ?: return@launch
-            _uiState.value = current.copy(awards = awards, awardsReady = true)
-        }
     }
 
     private suspend fun load() = coroutineScope {
@@ -119,7 +97,6 @@ class PreviewViewModel(
                     rating = listContent?.let { SearchViewModel.parseRating(it, t.title) },
                     isStarred = isStarredDeferred.await()
                 )
-                loadMetadata(t)
             }
             is TmdbResult.Failure -> _uiState.value = PreviewUiState.Error("Failed to load title")
         }

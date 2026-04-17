@@ -7,48 +7,32 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Movie
-import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Tv
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import kotlinx.coroutines.flow.collect
-import androidx.compose.material3.AssistChip
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
@@ -58,12 +42,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -72,17 +51,11 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
-import androidx.compose.ui.input.nestedscroll.NestedScrollSource
-import androidx.compose.ui.input.nestedscroll.nestedScroll
-import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
 import com.moviesrecommender.navigation.Screen
 import coil.compose.AsyncImage
-import com.moviesrecommender.R
 import com.moviesrecommender.data.remote.tmdb.MediaType
 import com.moviesrecommender.util.ToastManager
 
@@ -182,15 +155,12 @@ private fun LoadedContent(
     val clipboardManager = LocalClipboardManager.current
     fun openUrl(url: String) = context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
 
-    var showDetails by remember(title.id) { mutableStateOf(false) }
-    var trailerScrolling by remember { mutableStateOf(false) }
-
     // recommend: pages = [back(0) | poster(1) | skip(2)], start at 1
-    // search: pages = [poster(0) | details(1)], start at 0
+    // search: pages = [poster(0)], start at 0
     val showBack = source == "recommend"
     val pagerState = rememberPagerState(
         initialPage = if (showBack) 1 else 0,
-        pageCount = { if (showBack) 3 else 2 }
+        pageCount = { if (showBack) 3 else 1 }
     )
 
     LaunchedEffect(pagerState) {
@@ -243,10 +213,10 @@ private fun LoadedContent(
         }
 
         // recommend layout: [back-trigger | poster | skip-trigger]
-        // search layout:         [poster | details]
+        // search layout:    [poster]
         HorizontalPager(
             state = pagerState,
-            userScrollEnabled = showBack && !trailerScrolling,
+            userScrollEnabled = showBack,
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
@@ -254,14 +224,8 @@ private fun LoadedContent(
             when {
                 showBack && page == 0 -> BackTriggerPage(modifier = Modifier.fillMaxSize())
                 showBack && page == 2 -> SkipTriggerPage(modifier = Modifier.fillMaxSize())
-                !showBack && page == 1 -> DetailsPage(
-                    state = state,
-                    onOpenUrl = ::openUrl,
-                    onTrailerScrollChange = { trailerScrolling = it },
-                    modifier = Modifier.fillMaxSize()
-                )
                 else -> {
-                    // Poster page (with optional details overlay)
+                    // Poster page — single tap opens IMDB
                     Box(
                         modifier = Modifier
                             .padding(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 12.dp)
@@ -271,26 +235,17 @@ private fun LoadedContent(
                             .combinedClickable(
                                 indication = null,
                                 interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
-                                onClick = { showDetails = !showDetails },
+                                onClick = { title.imdbId?.let { openUrl("https://www.imdb.com/title/$it/") } },
                                 onDoubleClick = onDoubleTap,
                                 onLongClick = onDoubleTap
                             )
                     ) {
-                        if (showDetails) {
-                            DetailsPage(
-                                state = state,
-                                onOpenUrl = ::openUrl,
-                                onTrailerScrollChange = { trailerScrolling = it },
-                                modifier = Modifier.fillMaxSize()
-                            )
-                        } else {
-                            AsyncImage(
-                                model = title.posterUrl(500),
-                                contentDescription = title.title,
-                                contentScale = ContentScale.FillWidth,
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                        }
+                        AsyncImage(
+                            model = title.posterUrl(500),
+                            contentDescription = title.title,
+                            contentScale = ContentScale.FillWidth,
+                            modifier = Modifier.fillMaxWidth()
+                        )
                     }
                 }
             }
@@ -350,187 +305,6 @@ private fun SkipTriggerPage(modifier: Modifier = Modifier) {
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
             )
-        }
-    }
-}
-
-@Composable
-private fun DetailsPage(
-    state: PreviewUiState.Loaded,
-    onOpenUrl: (String) -> Unit,
-    onTrailerScrollChange: (Boolean) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val title = state.title
-
-    Column(
-        modifier = modifier
-            .padding(horizontal = 12.dp, vertical = 12.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant)
-            // no inner padding — trailer fills flush to card edges
-    ) {
-        // Scrollable content
-        val scrollState = rememberScrollState()
-        Column(
-            modifier = Modifier
-                .weight(1f)
-                .drawWithContent {
-                    drawContent()
-                    if (scrollState.maxValue > 0) {
-                        val trackPad = 3.dp.toPx()
-                        val thumbW = 3.dp.toPx()
-                        val viewport = size.height
-                        val total = viewport + scrollState.maxValue
-                        val thumbH = (viewport / total) * viewport
-                        val thumbY = (scrollState.value.toFloat() / scrollState.maxValue) * (viewport - thumbH)
-                        drawRoundRect(
-                            color = Color.White.copy(alpha = 0.35f),
-                            topLeft = Offset(size.width - thumbW - trackPad, thumbY),
-                            size = Size(thumbW, thumbH),
-                            cornerRadius = CornerRadius(thumbW / 2)
-                        )
-                    }
-                }
-                .verticalScroll(scrollState),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            // Trailers
-            if (title.trailerKeys.isEmpty()) {
-                Text(
-                    "No Trailer Found",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = Color.White.copy(alpha = 0.6f),
-                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp)
-                )
-            } else {
-                val trailerState = rememberLazyListState()
-                LaunchedEffect(trailerState.isScrollInProgress) {
-                    onTrailerScrollChange(trailerState.isScrollInProgress)
-                }
-                // Consume all horizontal scroll/fling so it never leaks to the parent pager
-                val consumeHorizontal = remember {
-                    object : NestedScrollConnection {
-                        override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource) =
-                            Offset(available.x, 0f)
-                        override suspend fun onPostFling(consumed: Velocity, available: Velocity) =
-                            Velocity(available.x, 0f)
-                    }
-                }
-                LazyRow(
-                    state = trailerState,
-                    flingBehavior = rememberSnapFlingBehavior(trailerState),
-                    modifier = Modifier.fillMaxWidth().nestedScroll(consumeHorizontal)
-                ) {
-                    items(title.trailerKeys) { key ->
-                        Box(
-                            modifier = Modifier
-                                .fillParentMaxWidth()
-                                .aspectRatio(16f / 9f)
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(Color.Black)
-                                .clickable { onOpenUrl("https://www.youtube.com/watch?v=$key") },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            AsyncImage(
-                                model = "https://img.youtube.com/vi/$key/hqdefault.jpg",
-                                contentDescription = "Trailer",
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier.fillMaxSize()
-                            )
-                            Box(
-                                modifier = Modifier
-                                    .size(48.dp)
-                                    .background(Color.Black.copy(alpha = 0.55f), CircleShape),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Filled.PlayArrow,
-                                    contentDescription = "Play trailer",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(30.dp)
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Text content with horizontal padding
-            Column(
-                modifier = Modifier.padding(start = 4.dp, end = 4.dp, bottom = 4.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-
-            // Genres: max 3 tags AND max 3 total words, + Wikipedia icon
-            val displayGenres = buildList {
-                var wordCount = 0
-                for (genre in title.genres) {
-                    if (size >= 3) break
-                    val words = genre.trim().split("\\s+".toRegex()).size
-                    if (wordCount + words > 3) break
-                    add(genre)
-                    wordCount += words
-                }
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                displayGenres.forEach { genre ->
-                    AssistChip(
-                        onClick = {},
-                        label = { Text(genre, style = MaterialTheme.typography.bodySmall) }
-                    )
-                }
-            }
-
-            // Short plot (OMDB) with fallback to first sentence of TMDB overview
-            when {
-                !state.shortPlotReady -> CircularProgressIndicator(
-                    modifier = Modifier.size(20.dp).align(Alignment.CenterHorizontally),
-                    strokeWidth = 2.dp
-                )
-                state.shortPlot != null -> Text(
-                    state.shortPlot,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = Color.White
-                )
-                else -> title.overview?.takeIf { it.isNotBlank() }?.let { overview ->
-                    val short = overview.split(Regex("(?<=[.!?])\\s+")).first()
-                    Text(short, style = MaterialTheme.typography.bodyMedium, color = Color.White)
-                }
-            }
-
-            // Awards
-            when {
-                !state.awardsReady -> CircularProgressIndicator(
-                    modifier = Modifier.size(20.dp).align(Alignment.CenterHorizontally),
-                    strokeWidth = 2.dp
-                )
-                state.awards.isEmpty() -> Text(
-                    "No notable awards",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = Color.White.copy(alpha = 0.6f)
-                )
-                else -> Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(
-                        "Won ${state.awards.size} Notable Award${if (state.awards.size == 1) "" else "s"}",
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = Color.White
-                    )
-                    state.awards.forEach { award ->
-                        val label = if (award.year != null) "· ${award.name} (${award.year})"
-                                    else "· ${award.name}"
-                        Text(label, style = MaterialTheme.typography.bodyMedium, color = Color.White)
-                    }
-                }
-            }
-
-            } // end padded text content Column
-
         }
     }
 }
