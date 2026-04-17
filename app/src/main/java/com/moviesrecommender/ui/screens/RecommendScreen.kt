@@ -68,6 +68,16 @@ fun RecommendScreen(navController: NavHostController) {
         }
 
         when (val state = uiState) {
+            is RecommendUiState.FetchingList -> {
+                Column(
+                    modifier = Modifier.align(Alignment.Center),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    CircularProgressIndicator()
+                    Text("Fetching your list…", style = MaterialTheme.typography.bodyLarge)
+                }
+            }
             is RecommendUiState.Loading -> {
                 Column(
                     modifier = Modifier.align(Alignment.Center),
@@ -76,6 +86,11 @@ fun RecommendScreen(navController: NavHostController) {
                 ) {
                     CircularProgressIndicator()
                     Text("Finding a recommendation…", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        text = "Attempt ${state.attempt}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                    )
                 }
             }
             is RecommendUiState.Error -> {
@@ -101,7 +116,7 @@ fun RecommendScreen(navController: NavHostController) {
                         )
                     }
                     Spacer(Modifier.height(4.dp))
-                    Button(onClick = { viewModel.startBatch() }) {
+                    Button(onClick = { viewModel.startBatch(1) }) {
                         Text("Retry")
                     }
                 }

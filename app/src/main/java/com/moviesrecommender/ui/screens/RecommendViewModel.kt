@@ -21,7 +21,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 sealed class RecommendUiState {
-    object Loading : RecommendUiState()
+    object FetchingList : RecommendUiState()
+    data class Loading(val attempt: Int = 1) : RecommendUiState()
     data class Error(val message: String, val debugInfo: String? = null) : RecommendUiState()
 }
 
@@ -29,39 +30,49 @@ class RecommendViewModel : ViewModel() {
 
     private val app = MoviesRecommenderApp.instance
 
-    private val _uiState = MutableStateFlow<RecommendUiState>(RecommendUiState.Loading)
+    private val _uiState = MutableStateFlow<RecommendUiState>(RecommendUiState.Loading())
     val uiState: StateFlow<RecommendUiState> = _uiState.asStateFlow()
 
     private val _navigateToPreview = MutableSharedFlow<Pair<Int, String>>(extraBufferCapacity = 1)
     val navigateToPreview: SharedFlow<Pair<Int, String>> = _navigateToPreview.asSharedFlow()
 
     private var hasNavigatedToPreview = false
+    private var batchListContent: String? = null
 
     init {
         app.recommendSkippedTitles.clear()
         app.recommendQueue = emptyList()
         app.recommendQueueIndex = 0
-        startBatch()
+        startBatch(1)
     }
 
-    fun startBatch() {
+    fun startBatch(attempt: Int = 1) {
         viewModelScope.launch {
-            _uiState.value = RecommendUiState.Loading
-            app.recommendQueue = emptyList()
-            app.recommendQueueIndex = 0
+            _uiState.value = RecommendUiState.Loading(attempt)
+            if (attempt == 1) {
+                app.recommendQueue = emptyList()
+                app.recommendQueueIndex = 0
+                batchListContent = null
+                _uiState.value = RecommendUiState.FetchingList
+            }
 
-            val listContent = app.cachedListContent
+            val listContent = batchListContent
                 ?: when (val r = app.dropboxService.downloadList()) {
-                    is DropboxResult.Success -> r.value.also { app.cachedListContent = it }
+                    is DropboxResult.Success -> r.value.also {
+                        batchListContent = it
+                        app.cachedListContent = it
+                    }
                     is DropboxResult.Failure -> {
                         _uiState.value = RecommendUiState.Error(r.error.toMessage())
                         return@launch
                     }
                 }
 
+            _uiState.value = RecommendUiState.Loading(attempt)
+
             Log.d("Recommend", "listContent length=${listContent.length}")
 
-            val prompt = if (app.recommendEasy) "recommend 10 easy titles" else "recommend 10 titles"
+            val prompt = if (app.recommendEasy) "recommend 25 easy titles" else "recommend 25 titles"
             val result = app.anthropicService.sendPrompt(prompt, listContent)
             if (result is AnthropicResult.Failure) {
                 _uiState.value = RecommendUiState.Error(result.error.toMessage())
@@ -76,13 +87,11 @@ class RecommendViewModel : ViewModel() {
                 .filterNot { (t, y) -> "$t ($y)" in app.recommendSkippedTitles }
                 .distinctBy { it.first.lowercase() }
 
-            Log.d("Recommend", "${candidates.size} valid candidates after filtering")
+            Log.d("Recommend", "${candidates.size} valid candidates after filtering (attempt $attempt)")
 
             if (candidates.isEmpty()) {
-                _uiState.value = RecommendUiState.Error(
-                    "Could not find new recommendations.",
-                    "All suggestions were already in your list or previously shown."
-                )
+                Log.d("Recommend", "No candidates, retrying (attempt ${attempt + 1})")
+                startBatch(attempt + 1)
                 return@launch
             }
 
@@ -94,16 +103,25 @@ class RecommendViewModel : ViewModel() {
 
             val wishlistedIds = app.localStorageService.getStars().toSet()
 
-            val successes = tmdbResults.zip(candidates)
-                .mapNotNull { (r, _) -> (r as? TmdbResult.Success)?.value }
-                .filterNot { it.id in wishlistedIds }
-                .filter { it.trailerKeys.isNotEmpty() }
-                .filter { it.runtime == null || it.runtime <= 150 }
+            val afterTmdb = tmdbResults.zip(candidates).mapNotNull { (r, _) -> (r as? TmdbResult.Success)?.value }
             val failCount = tmdbResults.count { it is TmdbResult.Failure }
-            if (failCount > 0) Log.w("Recommend", "$failCount titles not found on TMDB, skipped")
+            Log.d("Recommend", "TMDB: ${afterTmdb.size} found, $failCount failed")
+
+            val afterWishlist = afterTmdb.filterNot { it.id in wishlistedIds }
+            Log.d("Recommend", "After wishlist filter: ${afterWishlist.size} (removed ${afterTmdb.size - afterWishlist.size})")
+
+            val afterTrailer = afterWishlist.filter { it.trailerKeys.isNotEmpty() }
+            Log.d("Recommend", "After trailer filter: ${afterTrailer.size} (removed ${afterWishlist.size - afterTrailer.size})")
+
+            val successes = afterTrailer.filter { it.runtime == null || it.runtime <= 180 }
+            Log.d("Recommend", "After runtime filter: ${successes.size} (removed ${afterTrailer.size - successes.size})")
+            afterTrailer.filter { it.runtime != null && it.runtime > 180 }.forEach {
+                Log.d("Recommend", "  Runtime filtered: ${it.title} (${it.runtime}min)")
+            }
 
             if (successes.isEmpty()) {
-                _uiState.value = RecommendUiState.Error("None of the recommendations were found on TMDB.")
+                Log.d("Recommend", "No TMDB successes, retrying (attempt ${attempt + 1})")
+                startBatch(attempt + 1)
                 return@launch
             }
 
@@ -126,12 +144,12 @@ class RecommendViewModel : ViewModel() {
     }
 
     companion object {
-private val NUMBERED_REGEX = Regex("""^\d{1,2}\.\s+(.+?)\s*\((\d{4})\)\s*$""")
+private val TITLE_REGEX = Regex("""^(?:\d{1,2}[.)]\s+)?\[?(.+?)\s*\((\d{4})\)\]?\s*$""")
 
         fun parseRecommendTitles(response: String): List<Pair<String, Int>> =
             response.lines().mapNotNull { line ->
-                val clean = line.trim().replace(Regex("""[*_]+"""), "")
-                val match = NUMBERED_REGEX.matchEntire(clean) ?: return@mapNotNull null
+                val clean = line.trim().replace(Regex("""[*_]+"""), "").trimStart('[').trimEnd(']')
+                val match = TITLE_REGEX.matchEntire(clean) ?: return@mapNotNull null
                 val title = match.groupValues[1].trim()
                 val year = match.groupValues[2].toIntOrNull() ?: return@mapNotNull null
                 Pair(title, year)
