@@ -56,7 +56,7 @@ fun ActionsScreen(navController: NavHostController) {
         IconButton(
             onClick = { navController.navigate(Screen.Setup.createRoute(showContinueAnyway = false)) },
             modifier = Modifier
-                .align(Alignment.TopEnd)
+                .align(Alignment.BottomEnd)
                 .padding(8.dp)
                 .size(48.dp)
         ) {

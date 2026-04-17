@@ -72,7 +72,7 @@ class RecommendViewModel : ViewModel() {
 
             Log.d("Recommend", "listContent length=${listContent.length}")
 
-            val prompt = if (app.recommendEasy) "recommend 25 easy titles" else "recommend 25 titles"
+            val prompt = if (app.recommendEasy) "recommend 10 easy titles" else "recommend 10 titles"
             val result = app.anthropicService.sendPrompt(prompt, listContent)
             if (result is AnthropicResult.Failure) {
                 _uiState.value = RecommendUiState.Error(result.error.toMessage())
@@ -113,9 +113,9 @@ class RecommendViewModel : ViewModel() {
             val afterTrailer = afterWishlist.filter { it.trailerKeys.isNotEmpty() }
             Log.d("Recommend", "After trailer filter: ${afterTrailer.size} (removed ${afterWishlist.size - afterTrailer.size})")
 
-            val successes = afterTrailer.filter { it.runtime == null || it.runtime <= 180 }
+            val successes = afterTrailer.filter { it.runtime == null || it.runtime <= 150 }
             Log.d("Recommend", "After runtime filter: ${successes.size} (removed ${afterTrailer.size - successes.size})")
-            afterTrailer.filter { it.runtime != null && it.runtime > 180 }.forEach {
+            afterTrailer.filter { it.runtime != null && it.runtime > 150 }.forEach {
                 Log.d("Recommend", "  Runtime filtered: ${it.title} (${it.runtime}min)")
             }
 

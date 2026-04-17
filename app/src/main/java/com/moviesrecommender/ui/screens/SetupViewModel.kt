@@ -14,6 +14,7 @@ class SetupViewModel : ViewModel() {
 
     private val app = MoviesRecommenderApp.instance
     private val dropboxService = app.dropboxService
+    private val anthropicAuthManager = app.anthropicService.authManager
 
     private val _dropboxAuthenticated = MutableStateFlow(dropboxService.isAuthenticated())
     val dropboxAuthenticated = _dropboxAuthenticated.asStateFlow()
@@ -26,6 +27,14 @@ class SetupViewModel : ViewModel() {
 
     private val _isLoading = MutableStateFlow(false)
     val isLoading = _isLoading.asStateFlow()
+
+    private val _useHaiku = MutableStateFlow(anthropicAuthManager.getUseHaiku())
+    val useHaiku = _useHaiku.asStateFlow()
+
+    fun toggleUseHaiku(value: Boolean) {
+        anthropicAuthManager.setUseHaiku(value)
+        _useHaiku.value = value
+    }
 
     fun getDropboxAuthUrl(): String = dropboxService.getAuthUrl(BuildConfig.DROPBOX_APP_KEY)
 

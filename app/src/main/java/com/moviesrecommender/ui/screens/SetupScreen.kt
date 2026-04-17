@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -14,6 +15,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -46,6 +48,7 @@ fun SetupScreen(
     val listPath by setupViewModel.listPath.collectAsState()
     val listPathSet by setupViewModel.listPathSet.collectAsState()
     val isLoading by setupViewModel.isLoading.collectAsState()
+    val useHaiku by setupViewModel.useHaiku.collectAsState()
 
     var showListPathDialog by remember { mutableStateOf(false) }
     var pendingClearLabel by remember { mutableStateOf("") }
@@ -126,6 +129,27 @@ fun SetupScreen(
                     pendingClearAction = { setupViewModel.clearListPath() }
                 }
             )
+
+            Spacer(Modifier.height(12.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+            ) {
+                Column {
+                    Text("Use Haiku model", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        if (useHaiku) "claude-haiku-4-5 (cheaper)" else "claude-sonnet-4-6 (default)",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = useHaiku,
+                    onCheckedChange = { setupViewModel.toggleUseHaiku(it) }
+                )
+            }
 
             if (showContinueAnyway) {
                 Spacer(Modifier.height(32.dp))

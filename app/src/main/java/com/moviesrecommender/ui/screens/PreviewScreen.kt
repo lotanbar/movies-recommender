@@ -22,7 +22,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Tv
 import androidx.compose.runtime.Composable
@@ -34,6 +33,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshotFlow
 import kotlinx.coroutines.flow.collect
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
@@ -114,7 +114,16 @@ fun PreviewScreen(
         ) {
             when (val state = uiState) {
                 is PreviewUiState.Loading -> {
-                    CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+                    Column(modifier = Modifier.fillMaxSize()) {
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                        Box(
+                            modifier = Modifier
+                                .padding(start = 12.dp, end = 12.dp, top = 20.dp, bottom = 12.dp)
+                                .fillMaxSize()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(MaterialTheme.colorScheme.surfaceVariant)
+                        )
+                    }
                 }
                 is PreviewUiState.Error -> {
                     Text(
@@ -236,6 +245,11 @@ private fun LoadedContent(
                                 indication = null,
                                 interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
                                 onClick = { title.imdbId?.let { openUrl("https://www.imdb.com/title/$it/") } },
+                                onLongClick = {
+                                    clipboardManager.setText(AnnotatedString(title.title))
+                                    ToastManager.show("\"${title.title}\" copied to clipboard")
+                                    openUrl("https://hdtodayz.to")
+                                },
                                 onDoubleClick = onDoubleTap
                             )
                     ) {
@@ -254,58 +268,12 @@ private fun LoadedContent(
 
 @Composable
 private fun BackTriggerPage(modifier: Modifier = Modifier) {
-    Box(
-        modifier = modifier
-            .padding(horizontal = 16.dp, vertical = 8.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant),
-        contentAlignment = Alignment.Center
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                contentDescription = "Previous title",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
-                modifier = Modifier.size(64.dp)
-            )
-            Text(
-                "Previous title",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
-            )
-        }
-    }
+    Box(modifier = modifier)
 }
 
 @Composable
 private fun SkipTriggerPage(modifier: Modifier = Modifier) {
-    Box(
-        modifier = modifier
-            .padding(horizontal = 16.dp, vertical = 8.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant),
-        contentAlignment = Alignment.Center
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                contentDescription = "Skip",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
-                modifier = Modifier.size(64.dp)
-            )
-            Text(
-                "Not watched",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
-            )
-        }
-    }
+    Box(modifier = modifier)
 }
 
 @Composable
