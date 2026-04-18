@@ -8,6 +8,7 @@ class AnthropicAuthManager(private val store: TokenStore) {
         private const val KEY_API_KEY = "anthropic_api_key"
         private const val KEY_MODEL_ID = "anthropic_model_id"
         private const val KEY_USE_HAIKU = "anthropic_use_haiku"
+        private const val KEY_RECOMMEND_COUNT = "recommend_title_count"
     }
 
     fun saveApiKey(key: String) { store[KEY_API_KEY] = key }
@@ -18,6 +19,9 @@ class AnthropicAuthManager(private val store: TokenStore) {
 
     fun getUseHaiku(): Boolean = store[KEY_USE_HAIKU] == "true"
     fun setUseHaiku(value: Boolean) { store[KEY_USE_HAIKU] = if (value) "true" else "false" }
+
+    fun getRecommendCount(): Int = store[KEY_RECOMMEND_COUNT]?.toIntOrNull() ?: 10
+    fun setRecommendCount(value: Int) { store[KEY_RECOMMEND_COUNT] = value.coerceIn(1, 50).toString() }
 
     fun isConfigured(): Boolean = store[KEY_API_KEY] != null && store[KEY_MODEL_ID] != null
 

@@ -72,7 +72,8 @@ class RecommendViewModel : ViewModel() {
 
             Log.d("Recommend", "listContent length=${listContent.length}")
 
-            val prompt = if (app.recommendEasy) "recommend 10 easy titles" else "recommend 10 titles"
+            val count = app.anthropicService.authManager.getRecommendCount()
+            val prompt = if (app.recommendEasy) "recommend $count easy titles" else "recommend $count titles"
             val result = app.anthropicService.sendPrompt(prompt, listContent)
             if (result is AnthropicResult.Failure) {
                 _uiState.value = RecommendUiState.Error(result.error.toMessage())
