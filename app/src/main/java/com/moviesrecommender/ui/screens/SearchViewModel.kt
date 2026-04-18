@@ -95,16 +95,27 @@ class SearchViewModel : ViewModel() {
         currentPage = 0
         totalPages = 1
         _isSearching.value = true
-        when (val result = tmdbService.search(query, 1)) {
-            is TmdbResult.Success -> {
-                currentPage = 1
-                totalPages = result.value.totalPages
-                val items = fetchDetailsAndFilter(result.value.titles)
-                buffer.addAll(items)
-                displayedCount = minOf(INITIAL_COUNT, buffer.size)
-                _results.value = buffer.take(displayedCount)
+        var firstFailure = false
+        while (buffer.size < INITIAL_COUNT && currentPage < totalPages) {
+            val nextPage = currentPage + 1
+            when (val result = tmdbService.search(query, nextPage)) {
+                is TmdbResult.Success -> {
+                    currentPage = nextPage
+                    totalPages = result.value.totalPages
+                    val items = fetchDetailsAndFilter(result.value.titles)
+                    buffer.addAll(items)
+                }
+                is TmdbResult.Failure -> {
+                    firstFailure = true
+                    break
+                }
             }
-            is TmdbResult.Failure -> _results.value = emptyList()
+        }
+        if (firstFailure && buffer.isEmpty()) {
+            _results.value = emptyList()
+        } else {
+            displayedCount = minOf(INITIAL_COUNT, buffer.size)
+            _results.value = buffer.take(displayedCount)
         }
         _isSearching.value = false
     }
