@@ -2,7 +2,6 @@ package com.moviesrecommender.ui.screens
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.moviesrecommender.BuildConfig
 import com.moviesrecommender.MoviesRecommenderApp
 import com.moviesrecommender.data.remote.dropbox.DropboxResult
 import com.moviesrecommender.util.ToastManager
@@ -45,7 +44,7 @@ class SetupViewModel : ViewModel() {
         _recommendCount.value = clamped
     }
 
-    fun getDropboxAuthUrl(): String = dropboxService.getAuthUrl(BuildConfig.DROPBOX_APP_KEY)
+    fun getDropboxAuthUrl(): String = dropboxService.getAuthUrl()
 
     fun handleDropboxCallback(code: String) {
         viewModelScope.launch {

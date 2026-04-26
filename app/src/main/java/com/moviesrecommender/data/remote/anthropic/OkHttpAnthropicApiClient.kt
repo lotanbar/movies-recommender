@@ -1,5 +1,6 @@
 package com.moviesrecommender.data.remote.anthropic
 
+import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -118,7 +119,10 @@ class OkHttpAnthropicApiClient(
             val body = response.body?.string() ?: ""
             when {
                 response.code in 200..299 -> body
-                response.code == 401 -> throw AnthropicApiException.Unauthorized()
+                response.code == 401 -> {
+                    Log.e("Anthropic", "401 Unauthorized — body: $body")
+                    throw AnthropicApiException.Unauthorized()
+                }
                 response.code == 429 -> {
                     if (retryCount < 3) {
                         delay((1L shl retryCount) * 1000L) // 1s, 2s, 4s

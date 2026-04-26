@@ -4,15 +4,18 @@ class DropboxService(
     val authManager: DropboxAuthManager,
     private val apiClient: DropboxApiClient
 ) {
+    companion object {
+        const val APP_KEY = "pj3my54okmjjdrd"
+    }
+
     fun isAuthenticated(): Boolean = authManager.isAuthenticated()
 
-    fun getAuthUrl(appKey: String): String = authManager.buildAuthUrl(appKey)
+    fun getAuthUrl(): String = authManager.buildAuthUrl(APP_KEY)
 
     suspend fun handleAuthCallback(code: String): DropboxResult<Unit> {
         val verifier = authManager.getCodeVerifier()
             ?: return DropboxResult.Failure(DropboxError.Unknown("Missing code verifier"))
-        val appKey = authManager.getAppKey()
-            ?: return DropboxResult.Failure(DropboxError.Unknown("Missing app key"))
+        val appKey = authManager.getAppKey() ?: APP_KEY
         return try {
             val (accessToken, refreshToken) = apiClient.exchangeCode(code, verifier, appKey)
             authManager.saveTokens(accessToken, refreshToken)
@@ -41,8 +44,7 @@ class DropboxService(
     suspend fun refreshToken(): DropboxResult<Unit> {
         val refreshToken = authManager.getRefreshToken()
             ?: return DropboxResult.Failure(DropboxError.TokenExpired)
-        val appKey = authManager.getAppKey()
-            ?: return DropboxResult.Failure(DropboxError.Unknown("Missing app key"))
+        val appKey = authManager.getAppKey() ?: APP_KEY
         return try {
             val newToken = apiClient.refreshToken(refreshToken, appKey)
             authManager.updateAccessToken(newToken)
