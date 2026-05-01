@@ -75,5 +75,8 @@ class MoviesRecommenderApp : Application() {
         super.onCreate()
         instance = this
         ToastManager.init(this)
+        if (anthropicService.authManager.getApiKey() == null && BuildConfig.ANTHROPIC_API_KEY.isNotBlank()) {
+            anthropicService.authManager.saveApiKey(BuildConfig.ANTHROPIC_API_KEY)
+        }
     }
 }

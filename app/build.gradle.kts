@@ -19,15 +19,17 @@ android {
         applicationId = "com.moviesrecommender"
         minSdk = 26
         targetSdk = 35
-        versionCode = 4
-        versionName = "1.05"
+        versionCode = 5
+        versionName = "1.06"
         buildConfigField("String", "DROPBOX_APP_KEY", "\"${localProps.getProperty("dropbox.app.key", "")}\"")
+        buildConfigField("String", "ANTHROPIC_API_KEY", "\"${localProps.getProperty("anthropic.api.key", "")}\"")
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
 

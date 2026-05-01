@@ -33,6 +33,12 @@ class SetupViewModel : ViewModel() {
     private val _recommendCount = MutableStateFlow(anthropicAuthManager.getRecommendCount())
     val recommendCount = _recommendCount.asStateFlow()
 
+    private val _apiKey = MutableStateFlow(anthropicAuthManager.getApiKey())
+    val apiKey = _apiKey.asStateFlow()
+
+    private val _apiKeySet = MutableStateFlow(anthropicAuthManager.getApiKey() != null)
+    val apiKeySet = _apiKeySet.asStateFlow()
+
     fun toggleUseHaiku(value: Boolean) {
         anthropicAuthManager.setUseHaiku(value)
         _useHaiku.value = value
@@ -42,6 +48,18 @@ class SetupViewModel : ViewModel() {
         val clamped = value.coerceIn(1, 50)
         anthropicAuthManager.setRecommendCount(clamped)
         _recommendCount.value = clamped
+    }
+
+    fun saveApiKey(key: String) {
+        anthropicAuthManager.saveApiKey(key.trim())
+        _apiKey.value = key.trim()
+        _apiKeySet.value = key.isNotBlank()
+    }
+
+    fun clearApiKey() {
+        anthropicAuthManager.saveApiKey("")
+        _apiKey.value = null
+        _apiKeySet.value = false
     }
 
     fun getDropboxAuthUrl(): String = dropboxService.getAuthUrl()

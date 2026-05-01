@@ -53,8 +53,11 @@ fun SetupScreen(
     val isLoading by setupViewModel.isLoading.collectAsState()
     val useHaiku by setupViewModel.useHaiku.collectAsState()
     val recommendCount by setupViewModel.recommendCount.collectAsState()
+    val apiKey by setupViewModel.apiKey.collectAsState()
+    val apiKeySet by setupViewModel.apiKeySet.collectAsState()
 
     var showListPathDialog by remember { mutableStateOf(false) }
+    var showApiKeyDialog by remember { mutableStateOf(false) }
     var pendingClearLabel by remember { mutableStateOf("") }
     var pendingClearAction: (() -> Unit)? by remember { mutableStateOf(null) }
     var recommendCountInput by remember(recommendCount) { mutableStateOf(recommendCount.toString()) }
@@ -65,6 +68,18 @@ fun SetupScreen(
         appViewModel.dropboxAuthCode.collect { code ->
             setupViewModel.handleDropboxCallback(code)
         }
+    }
+
+    if (showApiKeyDialog) {
+        InputDialog(
+            title = "Claude API Key",
+            placeholder = "sk-ant-api03-...",
+            onConfirm = { key ->
+                setupViewModel.saveApiKey(key)
+                showApiKeyDialog = false
+            },
+            onDismiss = { showApiKeyDialog = false }
+        )
     }
 
     if (showListPathDialog) {
@@ -132,6 +147,19 @@ fun SetupScreen(
                 onClear = {
                     pendingClearLabel = "list file path"
                     pendingClearAction = { setupViewModel.clearListPath() }
+                }
+            )
+
+            Spacer(Modifier.height(12.dp))
+
+            CheckButton(
+                label = "Claude API Key",
+                completed = apiKeySet,
+                subtitle = apiKey?.let { "sk-ant-...${it.takeLast(6)}" },
+                onClick = { showApiKeyDialog = true },
+                onClear = {
+                    pendingClearLabel = "Claude API key"
+                    pendingClearAction = { setupViewModel.clearApiKey() }
                 }
             )
 
