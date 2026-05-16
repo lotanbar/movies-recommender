@@ -159,7 +159,8 @@ class SearchViewModel : ViewModel() {
     private fun Title.withRating() =
         TitleWithRating(this, listContent?.let { parseRating(it, title) })
 
-    companion object {(listContent: String, titleToFind: String): Int? {
+    companion object {
+        fun parseRating(listContent: String, titleToFind: String): Int? {
             var currentRating: Int? = null
             val normalized = titleToFind.lowercase().trim()
             for (line in listContent.lines()) {

@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.moviesrecommender.MoviesRecommenderApp
+import com.moviesrecommender.data.remote.dropbox.DropboxError
 import com.moviesrecommender.data.remote.dropbox.DropboxResult
 import com.moviesrecommender.data.remote.tmdb.MediaType
 import com.moviesrecommender.data.remote.tmdb.Title

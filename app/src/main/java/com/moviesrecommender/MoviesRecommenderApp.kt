@@ -66,6 +66,9 @@ class MoviesRecommenderApp : Application() {
     /** When true, the next recommend batch uses "recommend easy" instead of "recommend". */
     var recommendEasy: Boolean = false
 
+    /** Optional specification appended as "titles about: ..." in the recommend prompt. */
+    var recommendSpec: String = ""
+
     companion object {
         lateinit var instance: MoviesRecommenderApp
             private set
