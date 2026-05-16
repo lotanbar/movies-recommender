@@ -50,6 +50,7 @@ fun SearchScreen(
     val results by viewModel.results.collectAsState()
     val isSearching by viewModel.isSearching.collectAsState()
     val isLoadingMore by viewModel.isLoadingMore.collectAsState()
+    val listError by viewModel.listError.collectAsState()
 
     val listState = rememberLazyListState()
     val focusManager = LocalFocusManager.current
@@ -110,6 +111,16 @@ fun SearchScreen(
                 .padding(innerPadding)
         ) {
             when {
+                listError != null -> {
+                    Text(
+                        text = listError!!,
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .padding(horizontal = 32.dp),
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
                 isSearching -> {
                     CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
                 }

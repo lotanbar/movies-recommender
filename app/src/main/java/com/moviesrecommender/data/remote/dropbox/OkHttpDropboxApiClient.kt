@@ -111,6 +111,11 @@ class OkHttpDropboxApiClient(
             when {
                 response.code in 200..299 -> body
                 response.code == 401 -> throw DropboxApiException.Unauthorized()
+                response.code == 409 -> {
+                    val summary = try { org.json.JSONObject(body).optString("error_summary", "") } catch (_: Exception) { "" }
+                    if (summary.startsWith("path/not_found")) throw DropboxApiException.NotFound()
+                    else throw DropboxApiException.ServerError("HTTP 409: $body")
+                }
                 response.code == 429 -> throw DropboxApiException.RateLimited()
                 response.code == 507 -> throw DropboxApiException.InsufficientStorage()
                 else -> throw DropboxApiException.ServerError("HTTP ${response.code}: $body")

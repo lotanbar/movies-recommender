@@ -3,6 +3,7 @@ package com.moviesrecommender.ui.screens
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.moviesrecommender.MoviesRecommenderApp
+import com.moviesrecommender.data.remote.dropbox.DropboxError
 import com.moviesrecommender.data.remote.dropbox.DropboxResult
 import com.moviesrecommender.data.remote.tmdb.MediaType
 import com.moviesrecommender.data.remote.tmdb.Title
@@ -41,6 +42,9 @@ class SearchViewModel : ViewModel() {
 
     private val _isLoadingMore = MutableStateFlow(false)
     val isLoadingMore: StateFlow<Boolean> = _isLoadingMore.asStateFlow()
+
+    private val _listError = MutableStateFlow<String?>(null)
+    val listError: StateFlow<String?> = _listError.asStateFlow()
 
     private var listContent: String? = null
     private val buffer = mutableListOf<TitleWithRating>()
@@ -148,15 +152,14 @@ class SearchViewModel : ViewModel() {
     private suspend fun downloadList() {
         when (val result = dropboxService.downloadList()) {
             is DropboxResult.Success -> listContent = result.value
-            is DropboxResult.Failure -> Unit
+            is DropboxResult.Failure -> _listError.value = result.error.toMessage()
         }
     }
 
     private fun Title.withRating() =
         TitleWithRating(this, listContent?.let { parseRating(it, title) })
 
-    companion object {
-        fun parseRating(listContent: String, titleToFind: String): Int? {
+    companion object {(listContent: String, titleToFind: String): Int? {
             var currentRating: Int? = null
             val normalized = titleToFind.lowercase().trim()
             for (line in listContent.lines()) {
@@ -176,4 +179,13 @@ class SearchViewModel : ViewModel() {
             return null
         }
     }
+}
+
+private fun DropboxError.toMessage(): String = when (this) {
+    DropboxError.NoInternet -> "Download failed: No internet connection."
+    DropboxError.TokenExpired -> "Dropbox session expired - please re-authenticate."
+    DropboxError.FileNotFound -> "List file not found. Please update the path in Setup."
+    DropboxError.StorageFull -> "Dropbox storage is full."
+    DropboxError.RateLimit -> "Too many requests. Try again shortly."
+    is DropboxError.Unknown -> "Download failed: $message"
 }

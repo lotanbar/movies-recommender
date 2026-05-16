@@ -83,10 +83,17 @@ class PreviewViewModel(
         if (cached != null) {
             listContent = cached
         } else {
-            val listResult = dropboxService.downloadList()
-            if (listResult is DropboxResult.Success) {
-                listContent = listResult.value
-                app.cachedListContent = listResult.value
+            when (val listResult = dropboxService.downloadList()) {
+                is DropboxResult.Success -> {
+                    listContent = listResult.value
+                    app.cachedListContent = listResult.value
+                }
+                is DropboxResult.Failure -> {
+                    detailsDeferred.cancel()
+                    isStarredDeferred.cancel()
+                    _uiState.value = PreviewUiState.Error(listResult.error.toMessage())
+                    return@coroutineScope
+                }
             }
         }
         when (val result = detailsDeferred.await()) {
@@ -251,4 +258,13 @@ class PreviewViewModelFactory(
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T =
         PreviewViewModel(tmdbId, mediaTypeStr, source) as T
+}
+
+private fun DropboxError.toMessage(): String = when (this) {
+    DropboxError.NoInternet -> "Download failed: No internet connection."
+    DropboxError.TokenExpired -> "Dropbox session expired - please re-authenticate."
+    DropboxError.FileNotFound -> "List file not found. Please update the path in Setup."
+    DropboxError.StorageFull -> "Dropbox storage is full."
+    DropboxError.RateLimit -> "Too many requests. Try again shortly."
+    is DropboxError.Unknown -> "Download failed: $message"
 }

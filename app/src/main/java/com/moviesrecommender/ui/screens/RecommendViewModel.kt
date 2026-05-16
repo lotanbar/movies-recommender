@@ -83,7 +83,7 @@ class RecommendViewModel : ViewModel() {
             Log.d("Recommend", "Response: [$response]")
 
             val candidates = parseRecommendTitles(response)
-                .filter { (_, y) -> y >= 1985 }
+                .filter { (_, y) -> y >= 1990 }
                 .filterNot { (t, y) -> isTitleInRatedList(t, y, listContent) }
                 .filterNot { (t, y) -> "$t ($y)" in app.recommendSkippedTitles }
                 .distinctBy { it.first.lowercase() }
@@ -111,12 +111,9 @@ class RecommendViewModel : ViewModel() {
             val afterWishlist = afterTmdb.filterNot { it.id in wishlistedIds }
             Log.d("Recommend", "After wishlist filter: ${afterWishlist.size} (removed ${afterTmdb.size - afterWishlist.size})")
 
-            val afterTrailer = afterWishlist.filter { it.trailerKeys.isNotEmpty() }
-            Log.d("Recommend", "After trailer filter: ${afterTrailer.size} (removed ${afterWishlist.size - afterTrailer.size})")
-
-            val successes = afterTrailer.filter { it.runtime == null || it.runtime <= 150 }
-            Log.d("Recommend", "After runtime filter: ${successes.size} (removed ${afterTrailer.size - successes.size})")
-            afterTrailer.filter { it.runtime != null && it.runtime > 150 }.forEach {
+            val successes = afterWishlist.filter { it.runtime == null || it.runtime <= 150 }
+            Log.d("Recommend", "After runtime filter: ${successes.size} (removed ${afterWishlist.size - successes.size})")
+            afterWishlist.filter { it.runtime != null && it.runtime > 150 }.forEach {
                 Log.d("Recommend", "  Runtime filtered: ${it.title} (${it.runtime}min)")
             }
 
@@ -201,6 +198,7 @@ private fun AnthropicError.toMessage(): String = when (this) {
 private fun DropboxError.toMessage(): String = when (this) {
     DropboxError.NoInternet -> "Download failed: No internet connection."
     DropboxError.TokenExpired -> "Dropbox session expired - please re-authenticate."
+    DropboxError.FileNotFound -> "List file not found. Please update the path in Setup."
     DropboxError.StorageFull -> "Dropbox storage is full."
     DropboxError.RateLimit -> "Too many requests. Try again shortly."
     is DropboxError.Unknown -> "Download failed: $message"

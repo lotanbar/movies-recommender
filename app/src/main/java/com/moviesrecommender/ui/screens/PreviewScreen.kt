@@ -248,7 +248,6 @@ private fun LoadedContent(
                                 onLongClick = {
                                     clipboardManager.setText(AnnotatedString(title.title))
                                     ToastManager.show("\"${title.title}\" copied to clipboard")
-                                    openUrl("https://hdtodayz.to")
                                 },
                                 onDoubleClick = onDoubleTap
                             )

@@ -82,6 +82,7 @@ class DropboxService(
 
 internal fun DropboxApiException.toDropboxError(): DropboxError = when (this) {
     is DropboxApiException.Unauthorized -> DropboxError.TokenExpired
+    is DropboxApiException.NotFound -> DropboxError.FileNotFound
     is DropboxApiException.InsufficientStorage -> DropboxError.StorageFull
     is DropboxApiException.RateLimited -> DropboxError.RateLimit
     is DropboxApiException.NoNetwork -> DropboxError.NoInternet

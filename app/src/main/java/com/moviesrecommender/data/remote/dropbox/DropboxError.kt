@@ -3,6 +3,7 @@ package com.moviesrecommender.data.remote.dropbox
 sealed class DropboxError {
     data object NoInternet : DropboxError()
     data object TokenExpired : DropboxError()
+    data object FileNotFound : DropboxError()
     data object StorageFull : DropboxError()
     data object RateLimit : DropboxError()
     data class Unknown(val message: String) : DropboxError()

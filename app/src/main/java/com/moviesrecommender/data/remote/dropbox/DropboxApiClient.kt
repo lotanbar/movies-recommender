@@ -14,6 +14,7 @@ interface DropboxApiClient {
 
 sealed class DropboxApiException(message: String) : Exception(message) {
     class Unauthorized : DropboxApiException("Unauthorized")
+    class NotFound : DropboxApiException("File not found")
     class InsufficientStorage : DropboxApiException("Storage full")
     class RateLimited : DropboxApiException("Rate limited")
     class NoNetwork : DropboxApiException("No network")
