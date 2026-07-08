@@ -3,6 +3,7 @@ package com.moviesrecommender.ui.screens
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.moviesrecommender.MoviesRecommenderApp
+import com.moviesrecommender.data.local.ListEntryParser
 import com.moviesrecommender.data.remote.dropbox.DropboxError
 import com.moviesrecommender.data.remote.dropbox.DropboxResult
 import com.moviesrecommender.data.remote.tmdb.MediaType
@@ -160,25 +161,13 @@ class SearchViewModel : ViewModel() {
         TitleWithRating(this, listContent?.let { parseRating(it, title) })
 
     companion object {
-        fun parseRating(listContent: String, titleToFind: String): Int? {
-            var currentRating: Int? = null
-            val normalized = titleToFind.lowercase().trim()
-            for (line in listContent.lines()) {
-                val trimmed = line.trim()
-                val ratingMatch = Regex("^RATING:\\s*(\\d+)").find(trimmed)
-                if (ratingMatch != null) {
-                    currentRating = ratingMatch.groupValues[1].toIntOrNull()
-                    continue
-                }
-                if (trimmed.startsWith("- ")) {
-                    val titlePart = trimmed.removePrefix("- ").substringBefore("(").trim().lowercase()
-                    if (titlePart == normalized) {
-                        return if (currentRating == 0) null else currentRating
-                    }
-                }
-            }
-            return null
-        }
+        /**
+         * Best (numerically highest) tier among all segments matching [titleToFind] — a show
+         * split across tiers by season range shows its best tier here. The full per-range
+         * breakdown is only shown on the Preview screen (see ListEntryParser.parseSegments).
+         */
+        fun parseRating(listContent: String, titleToFind: String): Int? =
+            ListEntryParser.parseSegments(listContent, titleToFind).maxOfOrNull { it.tier }
     }
 }
 

@@ -61,4 +61,4 @@ THE RATED LIST
 ================================================================================
 
 The user's message that follows this system prompt contains their actual rated list.
-Each entry appears under a "RATING: <tier>" section header (1 through 4, corresponding to the tiers above) in the format "- Title (year)". Use it only as described in MODE 1 — as a taste fingerprint, never as a content map.
+Each entry appears under a "TIER <tier>" section header (4, 3, 2+, 2, or 1, corresponding to the tiers above) in the format "- Title (year)" — a title may also carry a "Season(s) N(-M)" suffix before the year if only specific seasons of a show were rated at that tier. Use it only as described in MODE 1 — as a taste fingerprint, never as a content map.

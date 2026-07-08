@@ -4,6 +4,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.moviesrecommender.MoviesRecommenderApp
+import com.moviesrecommender.data.local.ListEntryParser
+import com.moviesrecommender.data.local.ShowSegment
 import com.moviesrecommender.data.remote.dropbox.DropboxError
 import com.moviesrecommender.data.remote.dropbox.DropboxResult
 import com.moviesrecommender.data.remote.tmdb.MediaType
@@ -24,12 +26,21 @@ sealed class PreviewUiState {
     object Loading : PreviewUiState()
     data class Loaded(
         val title: Title,
+        /** Non-null only when there is exactly one whole-series segment — the common case, unrated shows also included. */
         val rating: Int?,
+        val segments: List<ShowSegment> = emptyList(),
         val isStarred: Boolean = false,
         val isUploading: Boolean = false,
         val uploadError: Boolean = false,
         /** (position, total) within the current recommend batch queue — null outside recommend flow. */
-        val queuePosition: Pair<Int, Int>? = null
+        val queuePosition: Pair<Int, Int>? = null,
+        val isPickingRange: Boolean = false,
+        val pickerFrom: Int? = null,
+        val pickerTo: Int? = null,
+        /** Tier currently selected in the open picker — only committed when Submit is tapped. */
+        val pickerTier: Int? = null,
+        /** Non-null when the picker is editing an existing structured segment rather than adding a new one. */
+        val editingSegment: ShowSegment? = null
     ) : PreviewUiState()
     data class Error(val message: String) : PreviewUiState()
 }
@@ -46,6 +57,11 @@ class PreviewViewModel(
     private val mediaType = if (mediaTypeStr == "TV") MediaType.TV else MediaType.MOVIE
 
     private var listContent: String? = null
+    /** Unsaved picker changes — never touches Dropbox or [app.cachedListContent] until [finalizeSeasonPicker]. */
+    private var draftListContent: String? = null
+    private var pendingRating: PendingRating? = null
+
+    private data class PendingRating(val tier: Int, val newLine: String, val replacingRawLines: List<String>)
 
     private fun currentQueuePosition(): Pair<Int, Int>? =
         if (source == "recommend" && app.recommendQueue.isNotEmpty())
@@ -65,21 +81,32 @@ class PreviewViewModel(
     private val _confirmFetchMore = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     val confirmFetchMore: SharedFlow<Unit> = _confirmFetchMore.asSharedFlow()
 
+    // Emitted when the current pick would overlap one or more existing segments for this show.
+    private val _confirmOverlapReplace = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val confirmOverlapReplace: SharedFlow<Unit> = _confirmOverlapReplace.asSharedFlow()
+
     init {
         val preloaded = app.cachedTitles[tmdbId]
         val cachedList = app.cachedListContent
         if (preloaded != null && cachedList != null) {
             // Data pre-fetched by Recommend flow — go straight to Loaded, no network needed.
             listContent = cachedList
-            _uiState.value = PreviewUiState.Loaded(
-                title = preloaded,
-                rating = SearchViewModel.parseRating(cachedList, preloaded.title),
-                queuePosition = currentQueuePosition()
-            )
+            _uiState.value = loadedState(preloaded, cachedList)
             viewModelScope.launch { loadStarStatus() }
         } else {
             viewModelScope.launch { load() }
         }
+    }
+
+    private fun loadedState(title: Title, content: String): PreviewUiState.Loaded {
+        val segments = ListEntryParser.parseSegments(content, title.title)
+        val rating = segments.singleOrNull()?.takeIf { it.seasonStart == null }?.tier
+        return PreviewUiState.Loaded(
+            title = title,
+            rating = rating,
+            segments = segments,
+            queuePosition = currentQueuePosition()
+        )
     }
 
     private suspend fun loadStarStatus() {
@@ -112,12 +139,7 @@ class PreviewViewModel(
         when (val result = detailsDeferred.await()) {
             is TmdbResult.Success -> {
                 val t = result.value
-                _uiState.value = PreviewUiState.Loaded(
-                    title = t,
-                    rating = listContent?.let { SearchViewModel.parseRating(it, t.title) },
-                    isStarred = isStarredDeferred.await(),
-                    queuePosition = currentQueuePosition()
-                )
+                _uiState.value = loadedState(t, listContent ?: "").copy(isStarred = isStarredDeferred.await())
             }
             is TmdbResult.Failure -> _uiState.value = PreviewUiState.Error("Failed to load title")
         }
@@ -182,96 +204,180 @@ class PreviewViewModel(
         }
     }
 
-    fun setRating(stars: Int) {
+    // --- Season-range picker ---
+
+    fun openSeasonPicker(editing: ShowSegment? = null, presetTier: Int? = null) {
         val loaded = _uiState.value as? PreviewUiState.Loaded ?: return
-        saveRating(loaded, stars)
+        draftListContent = listContent
+        val seasonNumbers = loaded.title.seasons.map { it.seasonNumber }
+        val defaultFrom = editing?.seasonStart ?: seasonNumbers.firstOrNull() ?: 1
+        val defaultTo = editing?.seasonEnd ?: seasonNumbers.lastOrNull() ?: defaultFrom
+        _uiState.value = loaded.copy(
+            isPickingRange = true,
+            pickerFrom = defaultFrom,
+            pickerTo = defaultTo,
+            pickerTier = editing?.tier ?: presetTier,
+            editingSegment = editing
+        )
     }
+
+    /** Discards any staged (unsubmitted) picker changes and closes the picker. */
+    fun closeSeasonPicker() {
+        val loaded = _uiState.value as? PreviewUiState.Loaded ?: return
+        draftListContent = null
+        _uiState.value = loadedState(loaded.title, listContent ?: "").copy(isStarred = loaded.isStarred)
+    }
+
+    /** Applies every staged picker change in one Dropbox upload, then closes the picker. */
+    fun finalizeSeasonPicker() {
+        val loaded = _uiState.value as? PreviewUiState.Loaded ?: return
+        val draft = draftListContent
+        draftListContent = null
+        if (draft == null || draft == listContent) {
+            _uiState.value = loaded.copy(
+                isPickingRange = false,
+                pickerFrom = null,
+                pickerTo = null,
+                pickerTier = null,
+                editingSegment = null
+            )
+            return
+        }
+        listContent = draft
+        app.cachedListContent = draft
+        _uiState.value = loadedState(loaded.title, draft).copy(isStarred = loaded.isStarred, isUploading = true)
+        uploadAndAdvance()
+    }
+
+    fun setPickerRange(from: Int, to: Int) {
+        val loaded = _uiState.value as? PreviewUiState.Loaded ?: return
+        val seasonNumbers = loaded.title.seasons.map { it.seasonNumber }
+        val minSeason = seasonNumbers.minOrNull() ?: 1
+        val maxSeason = seasonNumbers.maxOrNull() ?: 1
+        val clampedFrom = from.coerceIn(minSeason, maxSeason)
+        val clampedTo = to.coerceIn(clampedFrom, maxSeason)
+        _uiState.value = loaded.copy(pickerFrom = clampedFrom, pickerTo = clampedTo)
+    }
+
+    /** Tapping a tier in the picker stages that range immediately (local only, no upload). */
+    fun selectTierForCurrentRange(tier: Int) {
+        val loaded = _uiState.value as? PreviewUiState.Loaded ?: return
+        stageRating(tier, loaded.pickerFrom, loaded.pickerTo, loaded.editingSegment)
+    }
+
+    // --- Rating (whole-show tap, or a season range from the picker) ---
+
+    /** Whole-show one-tap rating — used by the persistent bottom bar. Commits and uploads immediately. */
+    fun setRating(stars: Int) = applyRating(stars, seasonStart = null, seasonEnd = null, editing = null)
 
     fun clearRating() {
         val loaded = _uiState.value as? PreviewUiState.Loaded ?: return
-        deleteFromList(loaded)
+        val wholeSeriesSegment = loaded.segments.singleOrNull { it.seasonStart == null } ?: return
+        deleteSegment(wholeSeriesSegment)
     }
 
-    private fun saveRating(loaded: PreviewUiState.Loaded, newRating: Int) {
-        val t = loaded.title
-        val updated = updateListRating(listContent ?: "", t.title, t.year, newRating)
+    fun deleteSegment(segment: ShowSegment) {
+        val loaded = _uiState.value as? PreviewUiState.Loaded ?: return
+        val updated = ListEntryParser.removeLine(listContent ?: "", segment.rawLine)
         listContent = updated
         app.cachedListContent = updated
-        when (source) {
-            "recommend" -> {
-                _uiState.value = loaded.copy(rating = newRating, isUploading = true, uploadError = false)
-                viewModelScope.launch {
-                    val uploadResult = app.dropboxService.uploadList(updated)
-                    val failed = uploadResult is DropboxResult.Failure
-                    val current = _uiState.value as? PreviewUiState.Loaded
-                    if (current != null) _uiState.value = current.copy(isUploading = false, uploadError = failed)
-                    advanceRecommendQueue()
-                }
-            }
-            else -> {
-                _uiState.value = loaded.copy(rating = newRating, isUploading = true, uploadError = false)
-                viewModelScope.launch {
-                    val result = dropboxService.uploadList(updated)
-                    val current = _uiState.value as? PreviewUiState.Loaded ?: return@launch
-                    _uiState.value = current.copy(isUploading = false, uploadError = result is DropboxResult.Failure)
-                }
-            }
+        _uiState.value = loadedState(loaded.title, updated).copy(isStarred = loaded.isStarred, isUploading = true)
+        uploadAndAdvance()
+    }
+
+    private fun applyRating(tier: Int, seasonStart: Int?, seasonEnd: Int?, editing: ShowSegment?) {
+        val loaded = _uiState.value as? PreviewUiState.Loaded ?: return
+        val t = loaded.title
+        val yearStart = seasonStart?.let { s -> t.seasons.firstOrNull { it.seasonNumber == s }?.year } ?: t.year
+        val yearEnd = seasonEnd?.let { e -> t.seasons.firstOrNull { it.seasonNumber == e }?.year }
+        val newLine = ListEntryParser.formatSegmentEntry(t.title, seasonStart, seasonEnd, yearStart, yearEnd)
+
+        // A whole-show pick (seasonStart == null) supersedes every existing segment for this show.
+        val overlapping = loaded.segments.filter { segment ->
+            segment.rawLine != editing?.rawLine &&
+                (seasonStart == null || seasonEnd == null || ListEntryParser.overlaps(segment, seasonStart, seasonEnd))
+        }
+        val replacingRawLines = (overlapping.map { it.rawLine } + listOfNotNull(editing?.rawLine)).distinct()
+
+        if (overlapping.isNotEmpty()) {
+            pendingRating = PendingRating(tier, newLine, replacingRawLines)
+            viewModelScope.launch { _confirmOverlapReplace.emit(Unit) }
+        } else {
+            commitRating(tier, newLine, replacingRawLines)
         }
     }
 
-    private fun deleteFromList(loaded: PreviewUiState.Loaded) {
-        val t = loaded.title
-        val updated = removeEntry(listContent ?: "", t.title, t.year)
+    private fun commitRating(tier: Int, newLine: String, replacingRawLines: List<String>) {
+        val loaded = _uiState.value as? PreviewUiState.Loaded ?: return
+        val updated = ListEntryParser.upsertSegment(listContent ?: "", tier, newLine, replacingRawLines)
         listContent = updated
         app.cachedListContent = updated
-        when (source) {
-            "recommend" -> {
-                _uiState.value = loaded.copy(rating = null, isUploading = true, uploadError = false)
-                viewModelScope.launch {
-                    val result = dropboxService.uploadList(updated)
-                    val current = _uiState.value as? PreviewUiState.Loaded ?: return@launch
-                    _uiState.value = current.copy(isUploading = false, uploadError = result is DropboxResult.Failure)
-                    advanceRecommendQueue()
-                }
-            }
-            else -> {
-                _uiState.value = loaded.copy(rating = null, isUploading = true, uploadError = false)
-                viewModelScope.launch {
-                    val result = dropboxService.uploadList(updated)
-                    val current = _uiState.value as? PreviewUiState.Loaded ?: return@launch
-                    _uiState.value = current.copy(isUploading = false, uploadError = result is DropboxResult.Failure)
-                }
-            }
+        _uiState.value = loadedState(loaded.title, updated).copy(isStarred = loaded.isStarred, isUploading = true)
+        uploadAndAdvance()
+    }
+
+    // --- Draft staging within an open season picker (no upload, no persistence until finalizeSeasonPicker) ---
+
+    private fun stageRating(tier: Int, seasonStart: Int?, seasonEnd: Int?, editing: ShowSegment?) {
+        val loaded = _uiState.value as? PreviewUiState.Loaded ?: return
+        val t = loaded.title
+        val base = draftListContent ?: listContent ?: ""
+        val draftSegments = ListEntryParser.parseSegments(base, t.title)
+        val yearStart = seasonStart?.let { s -> t.seasons.firstOrNull { it.seasonNumber == s }?.year } ?: t.year
+        val yearEnd = seasonEnd?.let { e -> t.seasons.firstOrNull { it.seasonNumber == e }?.year }
+        val newLine = ListEntryParser.formatSegmentEntry(t.title, seasonStart, seasonEnd, yearStart, yearEnd)
+
+        val overlapping = draftSegments.filter { segment ->
+            segment.rawLine != editing?.rawLine &&
+                (seasonStart == null || seasonEnd == null || ListEntryParser.overlaps(segment, seasonStart, seasonEnd))
+        }
+        val replacingRawLines = (overlapping.map { it.rawLine } + listOfNotNull(editing?.rawLine)).distinct()
+
+        if (overlapping.isNotEmpty()) {
+            pendingRating = PendingRating(tier, newLine, replacingRawLines)
+            viewModelScope.launch { _confirmOverlapReplace.emit(Unit) }
+        } else {
+            commitDraft(tier, newLine, replacingRawLines, base)
         }
     }
 
-    companion object {
-        fun updateListRating(content: String, title: String, year: Int, newRating: Int): String {
-            val entry = "- $title ($year)"
-            val header = "RATING: $newRating"
-            val lines = content.lines().filter { it.trim() != entry }.toMutableList()
-            val headerIdx = lines.indexOfFirst { it.trim().startsWith(header) }
-            if (headerIdx >= 0) {
-                // Insert at end of this section (just before the next blank line or RATING header)
-                var insertIdx = headerIdx + 1
-                while (insertIdx < lines.size &&
-                    lines[insertIdx].isNotBlank() &&
-                    !lines[insertIdx].trim().startsWith("RATING:")
-                ) {
-                    insertIdx++
-                }
-                lines.add(insertIdx, entry)
-            } else {
-                if (lines.isNotEmpty() && lines.last().isNotBlank()) lines.add("")
-                lines.add(header)
-                lines.add(entry)
-            }
-            return lines.joinToString("\n")
-        }
+    private fun commitDraft(tier: Int, newLine: String, replacingRawLines: List<String>, base: String) {
+        val loaded = _uiState.value as? PreviewUiState.Loaded ?: return
+        val updated = ListEntryParser.upsertSegment(base, tier, newLine, replacingRawLines)
+        draftListContent = updated
+        val draftSegments = ListEntryParser.parseSegments(updated, loaded.title.title)
+        val rating = draftSegments.singleOrNull()?.takeIf { it.seasonStart == null }?.tier
+        _uiState.value = loaded.copy(
+            segments = draftSegments,
+            rating = rating,
+            pickerTier = tier,
+            editingSegment = null
+        )
+    }
 
-        fun removeEntry(content: String, title: String, year: Int): String {
-            val entry = "- $title ($year)"
-            return content.lines().filter { it.trim() != entry }.joinToString("\n")
+    /** User confirmed replacing the overlapping segment(s) shown in the warning dialog. */
+    fun confirmOverlapReplace() {
+        val pending = pendingRating ?: return
+        pendingRating = null
+        val loaded = _uiState.value as? PreviewUiState.Loaded ?: return
+        if (loaded.isPickingRange) {
+            commitDraft(pending.tier, pending.newLine, pending.replacingRawLines, draftListContent ?: listContent ?: "")
+        } else {
+            commitRating(pending.tier, pending.newLine, pending.replacingRawLines)
+        }
+    }
+
+    fun cancelOverlapReplace() {
+        pendingRating = null
+    }
+
+    private fun uploadAndAdvance() {
+        viewModelScope.launch {
+            val result = dropboxService.uploadList(listContent ?: "")
+            val failed = result is DropboxResult.Failure
+            val current = _uiState.value as? PreviewUiState.Loaded
+            if (current != null) _uiState.value = current.copy(isUploading = false, uploadError = failed)
+            if (source == "recommend") advanceRecommendQueue()
         }
     }
 }

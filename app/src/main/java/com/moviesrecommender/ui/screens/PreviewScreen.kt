@@ -3,6 +3,7 @@ package com.moviesrecommender.ui.screens
 import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -11,17 +12,20 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Tv
 import androidx.compose.runtime.Composable
@@ -33,11 +37,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshotFlow
 import kotlinx.coroutines.flow.collect
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -61,8 +68,13 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
 import com.moviesrecommender.navigation.Screen
 import coil.compose.AsyncImage
+import com.moviesrecommender.data.local.ListEntryParser
+import com.moviesrecommender.data.local.ShowSegment
 import com.moviesrecommender.data.remote.tmdb.MediaType
 import com.moviesrecommender.util.ToastManager
+
+/** Matches the squared-off corner style of the main Actions screen buttons. */
+private val APP_CORNER_SHAPE = RoundedCornerShape(12.dp)
 
 @Composable
 fun PreviewScreen(
@@ -121,17 +133,76 @@ fun PreviewScreen(
         )
     }
 
+    var showOverlapConfirm by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        viewModel.confirmOverlapReplace.collect { showOverlapConfirm = true }
+    }
+    if (showOverlapConfirm) {
+        AlertDialog(
+            onDismissRequest = {
+                showOverlapConfirm = false
+                viewModel.cancelOverlapReplace()
+            },
+            title = { Text("Replace overlapping seasons?") },
+            text = { Text("This season range overlaps a rating you've already recorded for this show. Proceeding will replace it.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showOverlapConfirm = false
+                    viewModel.confirmOverlapReplace()
+                }) { Text("Replace") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showOverlapConfirm = false
+                    viewModel.cancelOverlapReplace()
+                }) { Text("Cancel") }
+            }
+        )
+    }
+
     Scaffold(
         bottomBar = {
             val loaded = uiState as? PreviewUiState.Loaded
             if (loaded != null) {
-                RatingBottomBar(
-                    rating = loaded.rating,
-                    isUploading = loaded.isUploading,
-                    uploadError = loaded.uploadError,
-                    onSetRating = viewModel::setRating,
-                    onClearRating = viewModel::clearRating
-                )
+                Column {
+                    if (loaded.title.mediaType == MediaType.TV && !loaded.isPickingRange) {
+                        SeasonSegments(
+                            segments = loaded.segments,
+                            showSegmentList = loaded.rating == null && loaded.segments.isNotEmpty(),
+                            onEditSegment = { segment -> if (segment.seasonStart != null) viewModel.openSeasonPicker(segment) },
+                            onDeleteSegment = viewModel::deleteSegment
+                        )
+                    }
+                    if (loaded.isPickingRange) {
+                        val seasonNumbers = loaded.title.seasons.map { it.seasonNumber }
+                        val seasonRange = (seasonNumbers.minOrNull() ?: 1)..(seasonNumbers.maxOrNull() ?: 1)
+                        SeasonPickerBar(
+                            seasonRange = seasonRange,
+                            from = loaded.pickerFrom ?: seasonRange.first,
+                            to = loaded.pickerTo ?: seasonRange.last,
+                            ratedTiers = loaded.segments.map { it.tier }.toSet(),
+                            selectedTier = loaded.pickerTier,
+                            segmentLabels = segmentLabelsByTier(loaded.segments),
+                            onFromChange = { viewModel.setPickerRange(it, loaded.pickerTo ?: it) },
+                            onToChange = { viewModel.setPickerRange(loaded.pickerFrom ?: it, it) },
+                            onSelectTier = viewModel::selectTierForCurrentRange,
+                            onSubmit = viewModel::finalizeSeasonPicker,
+                            onCancel = viewModel::closeSeasonPicker
+                        )
+                    } else {
+                        RatingBottomBar(
+                            activeTiers = loaded.segments.map { it.tier }.toSet(),
+                            segmentLabels = segmentLabelsByTier(loaded.segments),
+                            isUploading = loaded.isUploading,
+                            uploadError = loaded.uploadError,
+                            onSetRating = viewModel::setRating,
+                            onClearRating = viewModel::clearRating,
+                            onLongPressTier = { tier ->
+                                if (loaded.title.mediaType == MediaType.TV) viewModel.openSeasonPicker(null, tier)
+                            }
+                        )
+                    }
+                }
             }
         }
     ) { innerPadding ->
@@ -222,44 +293,6 @@ private fun LoadedContent(
     }
 
     Column(modifier = modifier) {
-        // Title fixed at top
-        Row(
-            modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Text(
-                text = buildAnnotatedString {
-                    pushStyle(SpanStyle(fontWeight = FontWeight.Bold))
-                    append(title.title)
-                    pop()
-                    append(" (${title.year})")
-                },
-                style = MaterialTheme.typography.headlineSmall,
-                modifier = Modifier
-                    .weight(1f)
-                    .clickable {
-                        clipboardManager.setText(AnnotatedString(title.title))
-                        ToastManager.show("Copied to clipboard")
-                    }
-            )
-            title.runtime?.let { mins ->
-                val h = mins / 60
-                val m = mins % 60
-                Text(
-                    text = if (h > 0) "${h}h ${m}m" else "${m}m",
-                    style = MaterialTheme.typography.headlineSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            Icon(
-                imageVector = if (title.mediaType == MediaType.TV) Icons.Filled.Tv else Icons.Filled.Movie,
-                contentDescription = if (title.mediaType == MediaType.TV) "TV" else "Film",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(22.dp)
-            )
-        }
-
         // recommend layout: [back-trigger | poster | skip-trigger]
         // search layout:    [poster]
         HorizontalPager(
@@ -267,7 +300,7 @@ private fun LoadedContent(
             userScrollEnabled = showBack,
             modifier = Modifier
                 .fillMaxWidth()
-                .weight(1f)
+                .weight(10f)
         ) { page ->
             when {
                 showBack && page == 0 -> BackTriggerPage(modifier = Modifier.fillMaxSize())
@@ -276,7 +309,7 @@ private fun LoadedContent(
                     // Poster page — single tap opens IMDB
                     Box(
                         modifier = Modifier
-                            .padding(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 12.dp)
+                            .padding(start = 8.dp, end = 8.dp, top = 4.dp, bottom = 2.dp)
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(8.dp))
                             .background(MaterialTheme.colorScheme.surfaceVariant)
@@ -300,6 +333,51 @@ private fun LoadedContent(
                     }
                 }
             }
+        }
+
+        // Title banner, vertically centered in the space between the poster and the bottom bar
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f),
+            contentAlignment = Alignment.Center
+        ) {
+        Row(
+            modifier = Modifier.padding(start = 16.dp, end = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                text = buildAnnotatedString {
+                    pushStyle(SpanStyle(fontWeight = FontWeight.Bold))
+                    append(title.title)
+                    pop()
+                    append(" (${title.year})")
+                },
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable {
+                        clipboardManager.setText(AnnotatedString(title.title))
+                        ToastManager.show("Copied to clipboard")
+                    }
+            )
+            title.runtime?.let { mins ->
+                val h = mins / 60
+                val m = mins % 60
+                Text(
+                    text = if (h > 0) "${h}h ${m}m" else "${m}m",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Icon(
+                imageVector = if (title.mediaType == MediaType.TV) Icons.Filled.Tv else Icons.Filled.Movie,
+                contentDescription = if (title.mediaType == MediaType.TV) "TV" else "Film",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(18.dp)
+            )
+        }
         }
     }
 }
@@ -368,38 +446,228 @@ private fun MediaTypePill(mediaType: MediaType, small: Boolean = false) {
 }
 
 @Composable
-private fun RatingBottomBar(
-    rating: Int?,
-    isUploading: Boolean,
-    uploadError: Boolean,
-    onSetRating: (Int) -> Unit,
-    onClearRating: () -> Unit
+private fun TierSelector(
+    activeTiers: Set<Int>,
+    onSelect: (Int) -> Unit,
+    onClear: (() -> Unit)? = null,
+    onLongPress: ((Int) -> Unit)? = null,
+    segmentLabels: Map<Int, String> = emptyMap()
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceEvenly,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        ListEntryParser.TIERS.forEach { n ->
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                if (segmentLabels.isNotEmpty()) {
+                    Text(
+                        text = segmentLabels[n] ?: "",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+                RatingCircleButton(
+                    isActive = n in activeTiers,
+                    onClick = {
+                        if (activeTiers == setOf(n) && onClear != null) onClear() else onSelect(n)
+                    },
+                    onLongClick = onLongPress?.let { press -> { press(n) } }
+                ) {
+                    Text(text = ListEntryParser.tierLabel(n), style = MaterialTheme.typography.titleMedium)
+                }
+            }
+        }
+    }
+}
+
+/** For each tier, a compact "x-y" (or "x") label summarizing the numeric season ranges rated at that tier. */
+private fun segmentLabelsByTier(segments: List<ShowSegment>): Map<Int, String> =
+    segments.filter { it.seasonStart != null }
+        .groupBy { it.tier }
+        .mapValues { (_, segs) ->
+            segs.joinToString(", ") { s ->
+                if (s.seasonStart == s.seasonEnd) "${s.seasonStart}" else "${s.seasonStart}-${s.seasonEnd}"
+            }
+        }
+
+@Composable
+private fun SeasonSegments(
+    segments: List<ShowSegment>,
+    showSegmentList: Boolean,
+    onEditSegment: (ShowSegment) -> Unit,
+    onDeleteSegment: (ShowSegment) -> Unit
+) {
+    if (!showSegmentList) return
+    Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
+        segments.forEach { segment ->
+            SegmentRow(
+                segment = segment,
+                onClick = { onEditSegment(segment) },
+                onClear = { onDeleteSegment(segment) }
+            )
+            Spacer(Modifier.height(6.dp))
+        }
+    }
+}
+
+@Composable
+private fun SegmentRow(
+    segment: ShowSegment,
+    onClick: () -> Unit,
+    onClear: () -> Unit
+) {
+    OutlinedButton(
+        onClick = onClick,
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(52.dp),
+        shape = APP_CORNER_SHAPE,
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary),
+        colors = ButtonDefaults.outlinedButtonColors(
+            containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
+            contentColor = MaterialTheme.colorScheme.onSurface
+        )
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(28.dp)
+                    .clip(APP_CORNER_SHAPE)
+                    .background(MaterialTheme.colorScheme.primary),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = ListEntryParser.tierLabel(segment.tier),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onPrimary
+                )
+            }
+            Spacer(Modifier.width(12.dp))
+            Text(
+                text = segment.label,
+                style = MaterialTheme.typography.bodyLarge,
+                modifier = Modifier.weight(1f)
+            )
+            IconButton(onClick = onClear, modifier = Modifier.size(36.dp)) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "Remove",
+                    tint = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SeasonPickerBar(
+    seasonRange: IntRange,
+    from: Int,
+    to: Int,
+    ratedTiers: Set<Int>,
+    selectedTier: Int?,
+    segmentLabels: Map<Int, String>,
+    onFromChange: (Int) -> Unit,
+    onToChange: (Int) -> Unit,
+    onSelectTier: (Int) -> Unit,
+    onSubmit: () -> Unit,
+    onCancel: () -> Unit
 ) {
     Surface(tonalElevation = 8.dp) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .navigationBarsPadding()
-                .padding(vertical = 10.dp),
+                .padding(vertical = 9.dp, horizontal = 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(4.dp)
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly,
+                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                (1..4).forEach { n ->
-                    RatingCircleButton(
-                        isActive = rating == n,
-                        onClick = {
-                            if (rating == n) onClearRating() else onSetRating(n)
-                        }
-                    ) {
-                        Text(text = "$n", style = MaterialTheme.typography.titleMedium)
-                    }
-                }
+                Text(
+                    text = "Cancel",
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.clickable(onClick = onCancel)
+                )
+                Text("Pick seasons", style = MaterialTheme.typography.labelLarge)
+                Text(
+                    text = "Submit",
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.clickable(onClick = onSubmit)
+                )
             }
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(24.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                SeasonStepper(label = "From", value = from, range = seasonRange, onValueChange = onFromChange)
+                SeasonStepper(label = "To", value = to, range = seasonRange, onValueChange = onToChange)
+            }
+            TierSelector(
+                activeTiers = ratedTiers + setOfNotNull(selectedTier),
+                onSelect = onSelectTier,
+                segmentLabels = segmentLabels
+            )
+        }
+    }
+}
+
+@Composable
+private fun SeasonStepper(label: String, value: Int, range: IntRange, onValueChange: (Int) -> Unit) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = { if (value > range.first) onValueChange(value - 1) }) {
+                Text("–", style = MaterialTheme.typography.titleLarge)
+            }
+            Text(
+                text = "$value",
+                style = MaterialTheme.typography.titleMedium,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.width(28.dp)
+            )
+            IconButton(onClick = { if (value < range.last) onValueChange(value + 1) }) {
+                Text("+", style = MaterialTheme.typography.titleLarge)
+            }
+        }
+    }
+}
+
+@Composable
+private fun RatingBottomBar(
+    activeTiers: Set<Int>,
+    segmentLabels: Map<Int, String> = emptyMap(),
+    isUploading: Boolean,
+    uploadError: Boolean,
+    onSetRating: (Int) -> Unit,
+    onClearRating: () -> Unit,
+    onLongPressTier: ((Int) -> Unit)? = null
+) {
+    Surface(tonalElevation = 8.dp) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(vertical = 9.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            TierSelector(
+                activeTiers = activeTiers,
+                onSelect = onSetRating,
+                onClear = onClearRating,
+                onLongPress = onLongPressTier,
+                segmentLabels = segmentLabels
+            )
             when {
                 isUploading -> Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -422,10 +690,12 @@ private fun RatingBottomBar(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun RatingCircleButton(
     isActive: Boolean,
     onClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null,
     content: @Composable () -> Unit
 ) {
     val bg = if (isActive) MaterialTheme.colorScheme.primary
@@ -434,10 +704,10 @@ private fun RatingCircleButton(
              else MaterialTheme.colorScheme.onSurfaceVariant
     Box(
         modifier = Modifier
-            .size(52.dp)
-            .clip(CircleShape)
+            .size(56.dp)
+            .clip(APP_CORNER_SHAPE)
             .background(bg)
-            .clickable(onClick = onClick),
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
         contentAlignment = Alignment.Center
     ) {
         CompositionLocalProvider(LocalContentColor provides fg) {

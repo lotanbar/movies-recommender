@@ -2,6 +2,12 @@ package com.moviesrecommender.data.remote.tmdb
 
 enum class MediaType { MOVIE, TV }
 
+data class SeasonInfo(
+    val seasonNumber: Int,
+    val year: Int?,
+    val episodeCount: Int
+)
+
 data class Title(
     val id: Int,
     val title: String,
@@ -19,7 +25,8 @@ data class Title(
     val writer: String? = null,
     val producers: List<String> = emptyList(),
     val extraPosterPaths: List<String> = emptyList(),
-    val runtime: Int? = null
+    val runtime: Int? = null,
+    val seasons: List<SeasonInfo> = emptyList()
 ) {
     fun posterUrl(width: Int = 500): String? =
         posterPath?.let { "https://image.tmdb.org/t/p/w$width$it" }

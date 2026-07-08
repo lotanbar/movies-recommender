@@ -86,7 +86,7 @@ class WishlistViewModel : ViewModel() {
             WishlistItem(title, listContent?.let { SearchViewModel.parseRating(it, title.title) })
         }
 
-        val conflicts = items.filter { it.rating != null && it.rating in 1..4 }
+        val conflicts = items.filter { it.rating != null }
         _uiState.value = WishlistUiState.Loaded(items, conflicts)
     }
 

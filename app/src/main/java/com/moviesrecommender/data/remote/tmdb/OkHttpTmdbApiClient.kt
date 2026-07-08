@@ -126,6 +126,27 @@ class OkHttpTmdbApiClient(
                 }
             }
 
+            val seasons = buildList {
+                if (mediaType == MediaType.TV) {
+                    val arr = obj.optJSONArray("seasons")
+                    if (arr != null) {
+                        for (i in 0 until arr.length()) {
+                            val season = arr.getJSONObject(i)
+                            val seasonNumber = season.optInt("season_number", -1)
+                            if (seasonNumber <= 0) continue
+                            val seasonYear = season.optString("air_date").take(4).toIntOrNull()
+                            add(
+                                SeasonInfo(
+                                    seasonNumber = seasonNumber,
+                                    year = seasonYear,
+                                    episodeCount = season.optInt("episode_count", 0)
+                                )
+                            )
+                        }
+                    }
+                }
+            }.sortedBy { it.seasonNumber }
+
             val mainPosterPath = obj.optString("poster_path").takeIf { it.isNotEmpty() }
             val runtime = obj.optInt("runtime", 0).takeIf { it > 0 }
                 ?: obj.optJSONArray("episode_run_time")?.optInt(0)?.takeIf { it > 0 }
@@ -159,7 +180,8 @@ class OkHttpTmdbApiClient(
                 writer = writer,
                 producers = producers,
                 extraPosterPaths = extraPosterPaths,
-                runtime = runtime
+                runtime = runtime,
+                seasons = seasons
             )
         }
 

@@ -4,6 +4,7 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.moviesrecommender.MoviesRecommenderApp
+import com.moviesrecommender.data.local.ListEntryParser
 import com.moviesrecommender.data.remote.anthropic.AnthropicError
 import com.moviesrecommender.data.remote.anthropic.AnthropicResult
 import com.moviesrecommender.data.remote.dropbox.DropboxError
@@ -90,7 +91,7 @@ class RecommendViewModel : ViewModel() {
 
             val candidates = parseRecommendTitles(response)
                 .filter { (_, y) -> y >= 1990 }
-                .filterNot { (t, y) -> isTitleInRatedList(t, y, listContent) }
+                .filterNot { (t, _) -> isTitleInRatedList(t, listContent) }
                 .filterNot { (t, y) -> "$t ($y)" in app.recommendSkippedTitles }
                 .distinctBy { it.first.lowercase() }
 
@@ -161,17 +162,17 @@ private val TITLE_REGEX = Regex("""^(?:\d{1,2}[.)]\s+)?\[?(.+?)\s*\((\d{4})\)\]?
                 Pair(title, year)
             }
 
-        fun isTitleInRatedList(title: String, year: Int, listContent: String): Boolean {
+        fun isTitleInRatedList(title: String, listContent: String): Boolean {
             val titleLower = title.lowercase().trim()
-            var currentRating = -1
+            var currentTier = -1
             for (line in listContent.lines()) {
                 val trimmed = line.trim()
-                val ratingMatch = Regex("^RATING:\\s*(\\d+)").find(trimmed)
-                if (ratingMatch != null) {
-                    currentRating = ratingMatch.groupValues[1].toIntOrNull() ?: -1
-                } else if (currentRating in 1..4 && trimmed.startsWith("-")) {
-                    val cleaned = trimmed.trimStart('-', ' ').trim().lowercase()
-                    if (cleaned == "$titleLower ($year)" || cleaned.startsWith("$titleLower (")) return true
+                val tier = ListEntryParser.headerTier(trimmed)
+                if (tier != null) {
+                    currentTier = tier
+                } else if (currentTier in ListEntryParser.TIERS && trimmed.startsWith("-")) {
+                    val titlePart = trimmed.trimStart('-', ' ').trim().substringBefore("(").trim()
+                    if (ListEntryParser.extractBaseTitle(titlePart).lowercase() == titleLower) return true
                 }
             }
             return false
@@ -179,13 +180,13 @@ private val TITLE_REGEX = Regex("""^(?:\d{1,2}[.)]\s+)?\[?(.+?)\s*\((\d{4})\)\]?
 
         fun buildRatedTitlesBlacklist(listContent: String): String {
             val titles = mutableListOf<String>()
-            var currentRating = -1
+            var currentTier = -1
             for (line in listContent.lines()) {
                 val trimmed = line.trim()
-                val ratingMatch = Regex("^RATING:\\s*(\\d+)").find(trimmed)
-                if (ratingMatch != null) {
-                    currentRating = ratingMatch.groupValues[1].toIntOrNull() ?: -1
-                } else if (currentRating in 1..4 && trimmed.startsWith("-")) {
+                val tier = ListEntryParser.headerTier(trimmed)
+                if (tier != null) {
+                    currentTier = tier
+                } else if (currentTier in ListEntryParser.TIERS && trimmed.startsWith("-")) {
                     titles.add(trimmed.trimStart('-', ' ').trim())
                 }
             }

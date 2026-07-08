@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -22,6 +21,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import com.moviesrecommender.data.local.ListEntryParser
 import com.moviesrecommender.data.remote.tmdb.Title
 import com.moviesrecommender.ui.theme.RatingBadge
 
@@ -83,12 +83,12 @@ private fun RatingBadge(rating: Int?) {
     Box(
         modifier = Modifier
             .size(32.dp)
-            .clip(CircleShape)
+            .clip(RoundedCornerShape(12.dp))
             .background(badgeColor),
         contentAlignment = Alignment.Center
     ) {
         Text(
-            text = rating?.toString() ?: "✕",
+            text = rating?.let { ListEntryParser.tierLabel(it) } ?: "✕",
             style = MaterialTheme.typography.labelLarge,
             color = textColor
         )
