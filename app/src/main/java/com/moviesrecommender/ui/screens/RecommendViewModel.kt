@@ -9,6 +9,7 @@ import com.moviesrecommender.data.remote.anthropic.AnthropicResult
 import com.moviesrecommender.data.remote.dropbox.DropboxError
 import com.moviesrecommender.data.remote.dropbox.DropboxResult
 import com.moviesrecommender.data.remote.tmdb.TmdbResult
+import com.moviesrecommender.util.ToastManager
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -74,7 +75,11 @@ class RecommendViewModel : ViewModel() {
 
             val count = app.anthropicService.authManager.getRecommendCount()
             val titlesClause = if (app.recommendSpec.isNotBlank()) "titles about: ${app.recommendSpec.trim()}" else "titles"
-            val prompt = if (app.recommendEasy) "recommend $count easy $titlesClause" else "recommend $count $titlesClause"
+            val avoidClause = if (app.recommendSkippedTitles.isNotEmpty()) {
+                "\n\nDo not recommend any of these — already shown or skipped this session:\n" +
+                    app.recommendSkippedTitles.joinToString("\n") { "- $it" }
+            } else ""
+            val prompt = "recommend $count $titlesClause$avoidClause"
             val result = app.anthropicService.sendPrompt(prompt, listContent)
             if (result is AnthropicResult.Failure) {
                 _uiState.value = RecommendUiState.Error(result.error.toMessage())
@@ -129,6 +134,8 @@ class RecommendViewModel : ViewModel() {
             app.recommendQueueIndex = 0
             // Remember all shown titles so next batch never re-suggests them
             successes.forEach { app.recommendSkippedTitles.add("${it.title} (${it.year})") }
+
+            ToastManager.show("Claude returned ${candidates.size}, ${successes.size} kept after filtering")
 
             hasNavigatedToPreview = true
             _navigateToPreview.emit(app.recommendQueue[0])

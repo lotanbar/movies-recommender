@@ -19,7 +19,7 @@ class AnthropicServiceTest {
         tokenStore = FakeTokenStore()
         authManager = AnthropicAuthManager(tokenStore)
         apiClient = FakeAnthropicApiClient()
-        service = AnthropicService(authManager, apiClient)
+        service = AnthropicService(authManager, apiClient, "SYSTEM PROMPT")
     }
 
     @Test
@@ -111,6 +111,11 @@ class FakeAnthropicApiClient : AnthropicApiClient {
     }
 
     override suspend fun sendMessages(apiKey: String, modelId: String, messages: List<Pair<String, String>>, system: String?): String {
+        sendException?.let { throw it }
+        return sendResponse
+    }
+
+    override suspend fun sendCachedMessage(apiKey: String, modelId: String, cachedContent: String, instruction: String, system: String?): String {
         sendException?.let { throw it }
         return sendResponse
     }

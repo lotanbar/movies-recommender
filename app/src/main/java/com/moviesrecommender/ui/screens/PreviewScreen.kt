@@ -32,6 +32,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshotFlow
 import kotlinx.coroutines.flow.collect
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Icon
@@ -40,6 +41,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -51,6 +55,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
@@ -93,6 +98,29 @@ fun PreviewScreen(
         }
     }
 
+    var showFetchMoreConfirm by remember { mutableStateOf(false) }
+    if (source == "recommend") {
+        LaunchedEffect(Unit) {
+            viewModel.confirmFetchMore.collect { showFetchMoreConfirm = true }
+        }
+    }
+    if (showFetchMoreConfirm) {
+        AlertDialog(
+            onDismissRequest = { showFetchMoreConfirm = false },
+            title = { Text("Fetch more titles?") },
+            text = { Text("This will fetch more titles from Claude, are you sure you want to proceed?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showFetchMoreConfirm = false
+                    viewModel.proceedFetchMore()
+                }) { Text("Proceed") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showFetchMoreConfirm = false }) { Text("Cancel") }
+            }
+        )
+    }
+
     Scaffold(
         bottomBar = {
             val loaded = uiState as? PreviewUiState.Loaded
@@ -133,15 +161,26 @@ fun PreviewScreen(
                     )
                 }
                 is PreviewUiState.Loaded -> {
-                    LoadedContent(
-                        state = state,
-                        source = source,
-                        hasPrevious = viewModel::hasPrevious,
-                        onNavigateBack = viewModel::navigateBack,
-                        onDoubleTap = viewModel::onDoubleTap,
-                        onSkip = viewModel::onSkip,
-                        modifier = Modifier.fillMaxSize()
-                    )
+                    Column(modifier = Modifier.fillMaxSize()) {
+                        state.queuePosition?.let { (position, total) ->
+                            Text(
+                                text = "$position / $total in this batch",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                            )
+                        }
+                        LoadedContent(
+                            state = state,
+                            source = source,
+                            hasPrevious = viewModel::hasPrevious,
+                            onNavigateBack = viewModel::navigateBack,
+                            onDoubleTap = viewModel::onDoubleTap,
+                            onSkip = viewModel::onSkip,
+                            modifier = Modifier.weight(1f).fillMaxWidth()
+                        )
+                    }
                 }
             }
         }

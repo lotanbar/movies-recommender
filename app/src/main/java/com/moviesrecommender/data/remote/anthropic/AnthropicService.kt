@@ -2,11 +2,12 @@ package com.moviesrecommender.data.remote.anthropic
 
 class AnthropicService(
     val authManager: AnthropicAuthManager,
-    private val apiClient: AnthropicApiClient
+    private val apiClient: AnthropicApiClient,
+    private val recommendSystemPrompt: String
 ) {
     companion object {
-        private const val MODEL_SONNET = "claude-sonnet-4-6"
-        private const val MODEL_HAIKU = "claude-haiku-4-5"
+        private const val MODEL_SONNET = "claude-sonnet-5"
+        private const val MODEL_HAIKU = "claude-haiku-4-5-20251001"
     }
 
     private fun effectiveModel(): String =
@@ -36,9 +37,16 @@ class AnthropicService(
         }
     }
 
+    /** [listContent] and the system prompt are cached (identical across retries); [mode] varies per request. */
     suspend fun sendPrompt(mode: String, listContent: String): AnthropicResult<String> {
         return try {
-            val response = apiClient.sendMessage(requireApiKey(), effectiveModel(), "$mode\n\n$listContent")
+            val response = apiClient.sendCachedMessage(
+                requireApiKey(),
+                effectiveModel(),
+                listContent,
+                mode,
+                recommendSystemPrompt
+            )
             AnthropicResult.Success(response.trim())
         } catch (e: AnthropicApiException) {
             AnthropicResult.Failure(e.toAnthropicError())

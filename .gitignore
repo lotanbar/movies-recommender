@@ -7,5 +7,6 @@ build/
 captures/
 .externalNativeBuild/
 .cxx/
+.kotlin/
 *.keystore
 !debug.keystore

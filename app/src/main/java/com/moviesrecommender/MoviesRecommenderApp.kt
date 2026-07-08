@@ -29,7 +29,8 @@ class MoviesRecommenderApp : Application() {
     }
 
     val anthropicService: AnthropicService by lazy {
-        AnthropicService(AnthropicAuthManager(tokenStore), OkHttpAnthropicApiClient())
+        val systemPrompt = resources.openRawResource(R.raw.movies_prompt).bufferedReader().use { it.readText() }
+        AnthropicService(AnthropicAuthManager(tokenStore), OkHttpAnthropicApiClient(), systemPrompt)
     }
 
     val tmdbService: TmdbService by lazy {
@@ -62,9 +63,6 @@ class MoviesRecommenderApp : Application() {
 
     /** Pre-fetched Title objects keyed by TMDB ID for instant PreviewScreen loading. */
     val cachedTitles: MutableMap<Int, Title> = java.util.concurrent.ConcurrentHashMap()
-
-    /** When true, the next recommend batch uses "recommend easy" instead of "recommend". */
-    var recommendEasy: Boolean = false
 
     /** Optional specification appended as "titles about: ..." in the recommend prompt. */
     var recommendSpec: String = ""

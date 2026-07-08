@@ -169,7 +169,7 @@ fun SetupScreen(
                 Column {
                     Text("Use Haiku model", style = MaterialTheme.typography.bodyLarge)
                     Text(
-                        if (useHaiku) "claude-haiku-4-5 (cheaper)" else "claude-sonnet-4-6 (default)",
+                        if (useHaiku) "claude-haiku-4-5 (cheaper)" else "claude-sonnet-5 (default)",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

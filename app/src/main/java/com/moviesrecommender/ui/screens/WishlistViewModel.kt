@@ -50,37 +50,41 @@ class WishlistViewModel : ViewModel() {
     private suspend fun load() = coroutineScope {
         _uiState.value = WishlistUiState.Loading
 
-        // Download list (reuse cached copy if available — HLD: always re-download before a read operation)
-        val listContent: String?
-        val listResult = dropboxService.downloadList()
-        listContent = if (listResult is DropboxResult.Success) {
-            app.cachedListContent = listResult.value
-            listResult.value
-        } else {
-            app.cachedListContent
-        }
-
         val starredEntities = localStorage.getStarsWithType()
         if (starredEntities.isEmpty()) {
             _uiState.value = WishlistUiState.Loaded(emptyList(), emptyList())
             return@coroutineScope
         }
 
-        // Fetch TMDB details for each starred title concurrently
-        val items = starredEntities.map { entity ->
+        // Download list and fetch TMDB details concurrently (was sequential before, doubling load time).
+        val listDeferred = async {
+            val listResult = dropboxService.downloadList()
+            if (listResult is DropboxResult.Success) {
+                app.cachedListContent = listResult.value
+                listResult.value
+            } else {
+                app.cachedListContent
+            }
+        }
+
+        // Reuse titles already fetched elsewhere in the app (e.g. Recommend/Preview) instead of
+        // re-fetching full TMDB details — including credits/videos/images — on every visit.
+        val titlesDeferred = starredEntities.map { entity ->
             async {
-                val mediaType = if (entity.mediaType == "TV") MediaType.TV else MediaType.MOVIE
-                when (val result = tmdbService.fetchDetails(entity.tmdbId, mediaType)) {
-                    is TmdbResult.Success -> {
-                        val rating = listContent?.let {
-                            SearchViewModel.parseRating(it, result.value.title)
-                        }
-                        WishlistItem(result.value, rating)
+                app.cachedTitles[entity.tmdbId] ?: run {
+                    val mediaType = if (entity.mediaType == "TV") MediaType.TV else MediaType.MOVIE
+                    when (val result = tmdbService.fetchDetails(entity.tmdbId, mediaType)) {
+                        is TmdbResult.Success -> result.value.also { app.cachedTitles[entity.tmdbId] = it }
+                        is TmdbResult.Failure -> null
                     }
-                    is TmdbResult.Failure -> null
                 }
             }
         }.awaitAll().filterNotNull()
+
+        val listContent = listDeferred.await()
+        val items = titlesDeferred.map { title ->
+            WishlistItem(title, listContent?.let { SearchViewModel.parseRating(it, title.title) })
+        }
 
         val conflicts = items.filter { it.rating != null && it.rating in 1..4 }
         _uiState.value = WishlistUiState.Loaded(items, conflicts)

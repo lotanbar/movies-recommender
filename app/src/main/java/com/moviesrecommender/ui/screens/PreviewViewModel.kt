@@ -27,7 +27,9 @@ sealed class PreviewUiState {
         val rating: Int?,
         val isStarred: Boolean = false,
         val isUploading: Boolean = false,
-        val uploadError: Boolean = false
+        val uploadError: Boolean = false,
+        /** (position, total) within the current recommend batch queue — null outside recommend flow. */
+        val queuePosition: Pair<Int, Int>? = null
     ) : PreviewUiState()
     data class Error(val message: String) : PreviewUiState()
 }
@@ -45,6 +47,11 @@ class PreviewViewModel(
 
     private var listContent: String? = null
 
+    private fun currentQueuePosition(): Pair<Int, Int>? =
+        if (source == "recommend" && app.recommendQueue.isNotEmpty())
+            Pair(app.recommendQueueIndex + 1, app.recommendQueue.size)
+        else null
+
     private val _uiState = MutableStateFlow<PreviewUiState>(PreviewUiState.Loading)
     val uiState: StateFlow<PreviewUiState> = _uiState.asStateFlow()
 
@@ -54,6 +61,10 @@ class PreviewViewModel(
     private val _autoAdvance = MutableSharedFlow<Pair<Int, String>?>(extraBufferCapacity = 1)
     val autoAdvance: SharedFlow<Pair<Int, String>?> = _autoAdvance.asSharedFlow()
 
+    // Emitted when advancing past the last title in the batch would trigger a new (paid) Claude fetch.
+    private val _confirmFetchMore = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val confirmFetchMore: SharedFlow<Unit> = _confirmFetchMore.asSharedFlow()
+
     init {
         val preloaded = app.cachedTitles[tmdbId]
         val cachedList = app.cachedListContent
@@ -62,7 +73,8 @@ class PreviewViewModel(
             listContent = cachedList
             _uiState.value = PreviewUiState.Loaded(
                 title = preloaded,
-                rating = SearchViewModel.parseRating(cachedList, preloaded.title)
+                rating = SearchViewModel.parseRating(cachedList, preloaded.title),
+                queuePosition = currentQueuePosition()
             )
             viewModelScope.launch { loadStarStatus() }
         } else {
@@ -103,7 +115,8 @@ class PreviewViewModel(
                 _uiState.value = PreviewUiState.Loaded(
                     title = t,
                     rating = listContent?.let { SearchViewModel.parseRating(it, t.title) },
-                    isStarred = isStarredDeferred.await()
+                    isStarred = isStarredDeferred.await(),
+                    queuePosition = currentQueuePosition()
                 )
             }
             is TmdbResult.Failure -> _uiState.value = PreviewUiState.Error("Failed to load title")
@@ -153,8 +166,20 @@ class PreviewViewModel(
 
     private suspend fun advanceRecommendQueue() {
         val nextIndex = app.recommendQueueIndex + 1
+        if (nextIndex >= app.recommendQueue.size) {
+            _confirmFetchMore.emit(Unit)
+            return
+        }
         app.recommendQueueIndex = nextIndex
         _autoAdvance.emit(app.recommendQueue.getOrNull(nextIndex))
+    }
+
+    /** User confirmed the "fetch more from Claude" prompt — proceed to end the batch. */
+    fun proceedFetchMore() {
+        viewModelScope.launch {
+            app.recommendQueueIndex = app.recommendQueue.size
+            _autoAdvance.emit(null)
+        }
     }
 
     fun setRating(stars: Int) {

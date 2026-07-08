@@ -16,12 +16,10 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -31,7 +29,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -46,18 +43,11 @@ private val CORNER = RoundedCornerShape(12.dp)
 @Composable
 fun ActionsScreen(navController: NavHostController) {
     val app = MoviesRecommenderApp.instance
-    var easyMode by remember { mutableStateOf(app.recommendEasy) }
     var specText by remember { mutableStateOf(app.recommendSpec) }
     var countInput by remember { mutableStateOf(app.anthropicService.authManager.getRecommendCount().toString()) }
 
     fun resolvedCount(): Int = countInput.toIntOrNull()?.coerceIn(1, 50)
         ?: app.anthropicService.authManager.getRecommendCount()
-
-    fun buildPromptPreview(): String {
-        val count = resolvedCount()
-        val titlesClause = if (specText.isNotBlank()) "titles about: ${specText.trim()}" else "titles"
-        return if (easyMode) "recommend $count easy $titlesClause" else "recommend $count $titlesClause"
-    }
 
     fun allConfigured(): Boolean =
         app.dropboxService.isAuthenticated() &&
@@ -96,7 +86,40 @@ fun ActionsScreen(navController: NavHostController) {
             verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Row 1: [Recommend] [number input]
+            Button(
+                onClick = { guardedNavigate(Screen.Search.route) },
+                modifier = Modifier.fillMaxWidth().height(BUTTON_HEIGHT),
+                shape = CORNER
+            ) {
+                Text(text = "Search", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold))
+            }
+
+            Button(
+                onClick = { guardedNavigate(Screen.Wishlist.route) },
+                modifier = Modifier.fillMaxWidth().height(BUTTON_HEIGHT),
+                shape = CORNER
+            ) {
+                Text(text = "Wishlist", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold))
+            }
+
+            HorizontalDivider()
+
+            // Recommend spec: [titles about: input]
+            OutlinedTextField(
+                value = specText,
+                onValueChange = { specText = it; app.recommendSpec = it },
+                modifier = Modifier.fillMaxWidth().height(BUTTON_HEIGHT),
+                singleLine = true,
+                shape = CORNER,
+                placeholder = {
+                    Text(
+                        "titles about: ...",
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+                    )
+                }
+            )
+
+            // [Recommend] [number input] — kept at the bottom of the action list
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -129,71 +152,6 @@ fun ActionsScreen(navController: NavHostController) {
                     textStyle = MaterialTheme.typography.titleLarge,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
                 )
-            }
-
-            // Row 2: [easy] [titles about: input]
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                if (easyMode) {
-                    Button(
-                        onClick = { easyMode = false; app.recommendEasy = false },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50)),
-                        shape = CORNER,
-                        modifier = Modifier.height(BUTTON_HEIGHT)
-                    ) {
-                        Text(text = "easy", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold))
-                    }
-                } else {
-                    OutlinedButton(
-                        onClick = { easyMode = true; app.recommendEasy = true },
-                        shape = CORNER,
-                        modifier = Modifier.height(BUTTON_HEIGHT)
-                    ) {
-                        Text(text = "easy", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold))
-                    }
-                }
-
-                OutlinedTextField(
-                    value = specText,
-                    onValueChange = { specText = it; app.recommendSpec = it },
-                    modifier = Modifier.weight(1f).height(BUTTON_HEIGHT),
-                    singleLine = true,
-                    shape = CORNER,
-                    placeholder = {
-                        Text(
-                            "titles about: ...",
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
-                        )
-                    }
-                )
-            }
-
-            // Prompt preview
-            Text(
-                text = buildPromptPreview(),
-                style = MaterialTheme.typography.titleMedium,
-                color = Color.White
-            )
-
-            HorizontalDivider()
-
-            Button(
-                onClick = { guardedNavigate(Screen.Search.route) },
-                modifier = Modifier.fillMaxWidth().height(BUTTON_HEIGHT),
-                shape = CORNER
-            ) {
-                Text(text = "Search", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold))
-            }
-
-            Button(
-                onClick = { guardedNavigate(Screen.Wishlist.route) },
-                modifier = Modifier.fillMaxWidth().height(BUTTON_HEIGHT),
-                shape = CORNER
-            ) {
-                Text(text = "Wishlist", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold))
             }
         }
     }

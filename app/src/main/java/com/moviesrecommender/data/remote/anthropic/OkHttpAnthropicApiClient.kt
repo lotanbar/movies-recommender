@@ -17,7 +17,7 @@ import java.util.concurrent.TimeUnit
 class OkHttpAnthropicApiClient(
     private val httpClient: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(120, TimeUnit.SECONDS)
+        .readTimeout(180, TimeUnit.SECONDS)
         .writeTimeout(30, TimeUnit.SECONDS)
         .build()
 ) : AnthropicApiClient {
@@ -49,14 +49,143 @@ class OkHttpAnthropicApiClient(
         prompt: String,
         system: String?
     ): String = withContext(Dispatchers.IO) {
+        val messages = org.json.JSONArray().apply {
+            put(JSONObject().apply {
+                put("role", "user")
+                put("content", prompt)
+            })
+        }
+        executeConversation(apiKey, modelId, system, messages)
+    }
+
+    override suspend fun sendCachedMessage(
+        apiKey: String,
+        modelId: String,
+        cachedContent: String,
+        instruction: String,
+        system: String?
+    ): String = withContext(Dispatchers.IO) {
+        val systemBlocks = system?.let {
+            org.json.JSONArray().apply {
+                put(JSONObject().apply {
+                    put("type", "text")
+                    put("text", it)
+                    put("cache_control", JSONObject().apply { put("type", "ephemeral") })
+                })
+            }
+        }
+
+        val contentBlocks = org.json.JSONArray().apply {
+            put(JSONObject().apply {
+                put("type", "text")
+                put("text", cachedContent)
+                put("cache_control", JSONObject().apply { put("type", "ephemeral") })
+            })
+            put(JSONObject().apply {
+                put("type", "text")
+                put("text", instruction)
+            })
+        }
+
+        val messages = org.json.JSONArray().apply {
+            put(JSONObject().apply {
+                put("role", "user")
+                put("content", contentBlocks)
+            })
+        }
+
+        // "medium" effort trims Sonnet's default (high) thinking depth — faster,
+        // cheaper, and tends to make fewer/more-consolidated tool calls too.
+        executeConversation(apiKey, modelId, systemBlocks, messages, effort = "medium")
+    }
+
+    private suspend fun executeConversation(
+        apiKey: String,
+        modelId: String,
+        system: Any?,
+        messages: org.json.JSONArray,
+        effort: String? = null
+    ): String {
+        var response = requestWithWebSearch(apiKey, modelId, system, messages, effort)
+        var content = response.getJSONArray("content")
+        var inputTokens = 0L
+        var outputTokens = 0L
+        var cacheWriteTokens = 0L
+        var cacheReadTokens = 0L
+        fun accumulateUsage(r: JSONObject) {
+            val usage = r.optJSONObject("usage") ?: return
+            inputTokens += usage.optLong("input_tokens")
+            outputTokens += usage.optLong("output_tokens")
+            cacheWriteTokens += usage.optLong("cache_creation_input_tokens")
+            cacheReadTokens += usage.optLong("cache_read_input_tokens")
+        }
+        accumulateUsage(response)
+
+        // Server-side tool loop (web_search) hits its iteration cap: resume by
+        // re-sending the assistant turn so far, since the API detects the
+        // trailing server_tool_use block and continues automatically.
+        var continuations = 0
+        while (response.optString("stop_reason") == "pause_turn" && continuations < 5) {
+            messages.put(JSONObject().apply {
+                put("role", "assistant")
+                put("content", content)
+            })
+            response = requestWithWebSearch(apiKey, modelId, system, messages, effort)
+            content = response.getJSONArray("content")
+            accumulateUsage(response)
+            continuations++
+        }
+
+        logUsageAndCost(modelId, inputTokens, outputTokens, cacheWriteTokens, cacheReadTokens)
+
+        val text = StringBuilder()
+        for (i in 0 until content.length()) {
+            val block = content.getJSONObject(i)
+            if (block.getString("type") == "text") text.append(block.getString("text"))
+        }
+        if (text.isEmpty()) throw AnthropicApiException.ServerError("No text block in response")
+        return text.toString()
+    }
+
+    /** Per-MTok pricing, current intro rates where applicable (see platform.claude.com/docs/en/pricing). */
+    private fun logUsageAndCost(
+        modelId: String,
+        inputTokens: Long,
+        outputTokens: Long,
+        cacheWriteTokens: Long,
+        cacheReadTokens: Long
+    ) {
+        val (inputRate, outputRate) = when {
+            modelId.contains("haiku") -> 1.00 to 5.00
+            else -> 2.00 to 10.00 // Sonnet 5 intro pricing
+        }
+        val cost = (inputTokens * inputRate +
+            outputTokens * outputRate +
+            cacheWriteTokens * inputRate * 1.25 +
+            cacheReadTokens * inputRate * 0.1) / 1_000_000.0
+        Log.d(
+            "AnthropicUsage",
+            "model=$modelId input=$inputTokens output=$outputTokens cacheWrite=$cacheWriteTokens cacheRead=$cacheReadTokens cost=$${"%.4f".format(cost)}"
+        )
+    }
+
+    private suspend fun requestWithWebSearch(
+        apiKey: String,
+        modelId: String,
+        system: Any?,
+        messages: org.json.JSONArray,
+        effort: String? = null
+    ): JSONObject {
         val bodyJson = JSONObject().apply {
             put("model", modelId)
-            put("max_tokens", 2048)
+            put("max_tokens", 8192)
             if (system != null) put("system", system)
-            put("messages", org.json.JSONArray().apply {
+            if (effort != null) put("output_config", JSONObject().apply { put("effort", effort) })
+            put("messages", messages)
+            put("tools", org.json.JSONArray().apply {
                 put(JSONObject().apply {
-                    put("role", "user")
-                    put("content", prompt)
+                    put("type", "web_search_20260209")
+                    put("name", "web_search")
                 })
             })
         }.toString()
@@ -68,13 +197,7 @@ class OkHttpAnthropicApiClient(
             .post(bodyJson.toRequestBody(json))
             .build()
 
-        val responseBody = execute(apiKey, request)
-        val content = JSONObject(responseBody).getJSONArray("content")
-        for (i in 0 until content.length()) {
-            val block = content.getJSONObject(i)
-            if (block.getString("type") == "text") return@withContext block.getString("text")
-        }
-        throw AnthropicApiException.ServerError("No text block in response")
+        return JSONObject(execute(apiKey, request))
     }
 
     override suspend fun sendMessages(
