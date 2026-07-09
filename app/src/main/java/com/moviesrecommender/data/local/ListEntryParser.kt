@@ -174,4 +174,52 @@ object ListEntryParser {
         val existingEnd = segment.seasonEnd ?: return true
         return newStart <= existingEnd && existingStart <= newEnd
     }
+
+    /**
+     * Splits [segment]'s season range around a newly-picked [newStart]-[newEnd] range,
+     * returning the contiguous sub-ranges of [segment] left over outside that pick (e.g. an
+     * existing "Seasons 1-4" segment losing season 3 to a different tier leaves [(1,2), (4,4)]).
+     * Empty if the new pick fully consumes the segment, or if the segment has no parseable
+     * numeric season range (whole-series/legacy free-text entries can't be split — callers
+     * should fully replace those instead).
+     */
+    fun carveRemainder(segment: ShowSegment, newStart: Int, newEnd: Int): List<Pair<Int, Int>> {
+        val start = segment.seasonStart ?: return emptyList()
+        val end = segment.seasonEnd ?: return emptyList()
+        val remaining = (start..end).filterNot { it in newStart..newEnd }
+        if (remaining.isEmpty()) return emptyList()
+        val runs = mutableListOf<Pair<Int, Int>>()
+        var runStart = remaining.first()
+        var prev = runStart
+        for (season in remaining.drop(1)) {
+            if (season == prev + 1) {
+                prev = season
+            } else {
+                runs.add(runStart to prev)
+                runStart = season
+                prev = season
+            }
+        }
+        runs.add(runStart to prev)
+        return runs
+    }
+
+    /**
+     * Removes [replacingRawLines] then inserts each (tier, line) pair from [entries] under its
+     * respective "TIER N" section. Generalizes [upsertSegment] to insert multiple lines —
+     * possibly across different tiers — in one pass, e.g. when a new pick partially overlaps
+     * an existing segment and leaves carve-out remainders behind at that segment's own tier.
+     */
+    fun upsertSegments(
+        content: String,
+        entries: List<Pair<Int, String>>,
+        replacingRawLines: List<String> = emptyList()
+    ): String {
+        if (entries.isEmpty()) return content
+        var result = upsertSegment(content, entries.first().first, entries.first().second, replacingRawLines)
+        for ((tier, line) in entries.drop(1)) {
+            result = upsertSegment(result, tier, line)
+        }
+        return result
+    }
 }

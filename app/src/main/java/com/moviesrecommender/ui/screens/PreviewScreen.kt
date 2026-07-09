@@ -144,7 +144,7 @@ fun PreviewScreen(
                 viewModel.cancelOverlapReplace()
             },
             title = { Text("Replace overlapping seasons?") },
-            text = { Text("This season range overlaps a rating you've already recorded for this show. Proceeding will replace it.") },
+            text = { Text("This season range overlaps a rating you've already recorded for this show. Proceeding will move just the overlapping seasons here; any other seasons in that rating stay where they are.") },
             confirmButton = {
                 TextButton(onClick = {
                     showOverlapConfirm = false
@@ -165,26 +165,18 @@ fun PreviewScreen(
             val loaded = uiState as? PreviewUiState.Loaded
             if (loaded != null) {
                 Column {
-                    if (loaded.title.mediaType == MediaType.TV && !loaded.isPickingRange) {
-                        SeasonSegments(
-                            segments = loaded.segments,
-                            showSegmentList = loaded.rating == null && loaded.segments.isNotEmpty(),
-                            onEditSegment = { segment -> if (segment.seasonStart != null) viewModel.openSeasonPicker(segment) },
-                            onDeleteSegment = viewModel::deleteSegment
-                        )
-                    }
                     if (loaded.isPickingRange) {
                         val seasonNumbers = loaded.title.seasons.map { it.seasonNumber }
                         val seasonRange = (seasonNumbers.minOrNull() ?: 1)..(seasonNumbers.maxOrNull() ?: 1)
                         SeasonPickerBar(
                             seasonRange = seasonRange,
-                            from = loaded.pickerFrom ?: seasonRange.first,
-                            to = loaded.pickerTo ?: seasonRange.last,
+                            from = loaded.pickerFrom,
+                            to = loaded.pickerTo,
                             ratedTiers = loaded.segments.map { it.tier }.toSet(),
                             selectedTier = loaded.pickerTier,
                             segmentLabels = segmentLabelsByTier(loaded.segments),
-                            onFromChange = { viewModel.setPickerRange(it, loaded.pickerTo ?: it) },
-                            onToChange = { viewModel.setPickerRange(loaded.pickerFrom ?: it, it) },
+                            onFromChange = viewModel::setPickerFrom,
+                            onToChange = viewModel::setPickerTo,
                             onSelectTier = viewModel::selectTierForCurrentRange,
                             onSubmit = viewModel::finalizeSeasonPicker,
                             onCancel = viewModel::closeSeasonPicker
@@ -354,9 +346,10 @@ private fun LoadedContent(
                     pop()
                     append(" (${title.year})")
                 },
-                style = MaterialTheme.typography.titleMedium,
+                style = MaterialTheme.typography.headlineSmall,
                 modifier = Modifier
                     .weight(1f)
+                    .align(Alignment.CenterVertically)
                     .clickable {
                         clipboardManager.setText(AnnotatedString(title.title))
                         ToastManager.show("Copied to clipboard")
@@ -367,15 +360,18 @@ private fun LoadedContent(
                 val m = mins % 60
                 Text(
                     text = if (h > 0) "${h}h ${m}m" else "${m}m",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    style = MaterialTheme.typography.titleLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.align(Alignment.CenterVertically)
                 )
             }
             Icon(
                 imageVector = if (title.mediaType == MediaType.TV) Icons.Filled.Tv else Icons.Filled.Movie,
                 contentDescription = if (title.mediaType == MediaType.TV) "TV" else "Film",
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(18.dp)
+                modifier = Modifier
+                    .size(22.dp)
+                    .align(Alignment.CenterVertically)
             )
         }
         }
@@ -492,89 +488,15 @@ private fun segmentLabelsByTier(segments: List<ShowSegment>): Map<Int, String> =
         }
 
 @Composable
-private fun SeasonSegments(
-    segments: List<ShowSegment>,
-    showSegmentList: Boolean,
-    onEditSegment: (ShowSegment) -> Unit,
-    onDeleteSegment: (ShowSegment) -> Unit
-) {
-    if (!showSegmentList) return
-    Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
-        segments.forEach { segment ->
-            SegmentRow(
-                segment = segment,
-                onClick = { onEditSegment(segment) },
-                onClear = { onDeleteSegment(segment) }
-            )
-            Spacer(Modifier.height(6.dp))
-        }
-    }
-}
-
-@Composable
-private fun SegmentRow(
-    segment: ShowSegment,
-    onClick: () -> Unit,
-    onClear: () -> Unit
-) {
-    OutlinedButton(
-        onClick = onClick,
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(52.dp),
-        shape = APP_CORNER_SHAPE,
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 0.dp),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary),
-        colors = ButtonDefaults.outlinedButtonColors(
-            containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
-            contentColor = MaterialTheme.colorScheme.onSurface
-        )
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(28.dp)
-                    .clip(APP_CORNER_SHAPE)
-                    .background(MaterialTheme.colorScheme.primary),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = ListEntryParser.tierLabel(segment.tier),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onPrimary
-                )
-            }
-            Spacer(Modifier.width(12.dp))
-            Text(
-                text = segment.label,
-                style = MaterialTheme.typography.bodyLarge,
-                modifier = Modifier.weight(1f)
-            )
-            IconButton(onClick = onClear, modifier = Modifier.size(36.dp)) {
-                Icon(
-                    imageVector = Icons.Default.Close,
-                    contentDescription = "Remove",
-                    tint = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.size(18.dp)
-                )
-            }
-        }
-    }
-}
-
-@Composable
 private fun SeasonPickerBar(
     seasonRange: IntRange,
-    from: Int,
-    to: Int,
+    from: Int?,
+    to: Int?,
     ratedTiers: Set<Int>,
     selectedTier: Int?,
     segmentLabels: Map<Int, String>,
-    onFromChange: (Int) -> Unit,
-    onToChange: (Int) -> Unit,
+    onFromChange: (Int?) -> Unit,
+    onToChange: (Int?) -> Unit,
     onSelectTier: (Int) -> Unit,
     onSubmit: () -> Unit,
     onCancel: () -> Unit
@@ -609,8 +531,8 @@ private fun SeasonPickerBar(
                 horizontalArrangement = Arrangement.spacedBy(24.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                SeasonStepper(label = "From", value = from, range = seasonRange, onValueChange = onFromChange)
-                SeasonStepper(label = "To", value = to, range = seasonRange, onValueChange = onToChange)
+                SeasonStepper(label = "From", value = from, range = seasonRange, sentinelBelow = true, onValueChange = onFromChange)
+                SeasonStepper(label = "To", value = to, range = seasonRange, sentinelAbove = true, onValueChange = onToChange)
             }
             TierSelector(
                 activeTiers = ratedTiers + setOfNotNull(selectedTier),
@@ -621,21 +543,45 @@ private fun SeasonPickerBar(
     }
 }
 
+/**
+ * A stepper whose value can also be "X" (null) at one end — below [range] for "From" (meaning
+ * "no lower bound picked"), above [range] for "To". Both sides at "X" means this tier is being
+ * skipped entirely; exactly one "X" means a single-season pick using the other side's value.
+ */
 @Composable
-private fun SeasonStepper(label: String, value: Int, range: IntRange, onValueChange: (Int) -> Unit) {
+private fun SeasonStepper(
+    label: String,
+    value: Int?,
+    range: IntRange,
+    sentinelBelow: Boolean = false,
+    sentinelAbove: Boolean = false,
+    onValueChange: (Int?) -> Unit
+) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Row(verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = { if (value > range.first) onValueChange(value - 1) }) {
+            IconButton(onClick = {
+                when {
+                    value == null && sentinelAbove -> onValueChange(range.last)
+                    value != null && value > range.first -> onValueChange(value - 1)
+                    value == range.first && sentinelBelow -> onValueChange(null)
+                }
+            }) {
                 Text("–", style = MaterialTheme.typography.titleLarge)
             }
             Text(
-                text = "$value",
+                text = value?.toString() ?: "X",
                 style = MaterialTheme.typography.titleMedium,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.width(28.dp)
             )
-            IconButton(onClick = { if (value < range.last) onValueChange(value + 1) }) {
+            IconButton(onClick = {
+                when {
+                    value == null && sentinelBelow -> onValueChange(range.first)
+                    value != null && value < range.last -> onValueChange(value + 1)
+                    value == range.last && sentinelAbove -> onValueChange(null)
+                }
+            }) {
                 Text("+", style = MaterialTheme.typography.titleLarge)
             }
         }

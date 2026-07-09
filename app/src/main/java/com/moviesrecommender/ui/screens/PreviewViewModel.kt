@@ -61,7 +61,14 @@ class PreviewViewModel(
     private var draftListContent: String? = null
     private var pendingRating: PendingRating? = null
 
-    private data class PendingRating(val tier: Int, val newLine: String, val replacingRawLines: List<String>)
+    private data class PendingRating(
+        val tier: Int,
+        val newLine: String,
+        val replacingRawLines: List<String>,
+        val carveEntries: List<Pair<Int, String>>,
+        val nextTier: Int?,
+        val thenFinalize: Boolean
+    )
 
     private fun currentQueuePosition(): Pair<Int, Int>? =
         if (source == "recommend" && app.recommendQueue.isNotEmpty())
@@ -209,16 +216,33 @@ class PreviewViewModel(
     fun openSeasonPicker(editing: ShowSegment? = null, presetTier: Int? = null) {
         val loaded = _uiState.value as? PreviewUiState.Loaded ?: return
         draftListContent = listContent
-        val seasonNumbers = loaded.title.seasons.map { it.seasonNumber }
-        val defaultFrom = editing?.seasonStart ?: seasonNumbers.firstOrNull() ?: 1
-        val defaultTo = editing?.seasonEnd ?: seasonNumbers.lastOrNull() ?: defaultFrom
         _uiState.value = loaded.copy(
             isPickingRange = true,
-            pickerFrom = defaultFrom,
-            pickerTo = defaultTo,
+            // Blank slate ("X"/"X") unless editing an existing segment's known range.
+            pickerFrom = editing?.seasonStart,
+            pickerTo = editing?.seasonEnd,
             pickerTier = editing?.tier ?: presetTier,
             editingSegment = editing
         )
+    }
+
+    private fun seasonBounds(loaded: PreviewUiState.Loaded): Pair<Int, Int> {
+        val seasonNumbers = loaded.title.seasons.map { it.seasonNumber }
+        val minSeason = seasonNumbers.minOrNull() ?: 1
+        val maxSeason = seasonNumbers.maxOrNull() ?: minSeason
+        return minSeason to maxSeason
+    }
+
+    /**
+     * Resolves the picker's From/To — each independently either a season number or "X" (null,
+     * meaning unset) — into a concrete range. Both "X" means the user doesn't want to rate this
+     * tier at all (null result). Exactly one "X" means a single-season pick using the other side.
+     */
+    private fun resolvePickerRange(from: Int?, to: Int?): Pair<Int, Int>? {
+        if (from == null && to == null) return null
+        val start = from ?: to!!
+        val end = to ?: from!!
+        return if (start <= end) start to end else end to start
     }
 
     /** Discards any staged (unsubmitted) picker changes and closes the picker. */
@@ -231,6 +255,41 @@ class PreviewViewModel(
     /** Applies every staged picker change in one Dropbox upload, then closes the picker. */
     fun finalizeSeasonPicker() {
         val loaded = _uiState.value as? PreviewUiState.Loaded ?: return
+        val targetTier = loaded.pickerTier
+        val resolved = targetTier?.let { resolvePickerRange(loaded.pickerFrom, loaded.pickerTo) }
+        if (targetTier != null && resolved != null) {
+            // Commit whatever range is still pending on the current target before uploading.
+            val (start, end) = resolved
+            stageRating(targetTier, start, end, loaded.editingSegment, nextTier = null, thenFinalize = true)
+        } else {
+            if (targetTier != null) clearDraftForSkip(loaded, targetTier, loaded.editingSegment)
+            finishDraft(_uiState.value as? PreviewUiState.Loaded ?: loaded)
+        }
+    }
+
+    /**
+     * "X"/"X" on a tier the user is leaving means "this tier should end up unrated" — so if it
+     * (or, when editing, the specific segment being edited) already has something staged in the
+     * draft, remove it rather than silently leaving the old rating in place.
+     */
+    private fun clearDraftForSkip(loaded: PreviewUiState.Loaded, tier: Int, editing: ShowSegment?) {
+        val base = draftListContent ?: listContent ?: ""
+        val draftSegments = ListEntryParser.parseSegments(base, loaded.title.title)
+        val toRemove = if (editing != null) {
+            draftSegments.filter { it.rawLine == editing.rawLine }
+        } else {
+            draftSegments.filter { it.tier == tier }
+        }
+        if (toRemove.isEmpty()) return
+        var updated = base
+        for (segment in toRemove) updated = ListEntryParser.removeLine(updated, segment.rawLine)
+        draftListContent = updated
+        val newSegments = ListEntryParser.parseSegments(updated, loaded.title.title)
+        val rating = newSegments.singleOrNull()?.takeIf { it.seasonStart == null }?.tier
+        _uiState.value = loaded.copy(segments = newSegments, rating = rating)
+    }
+
+    private fun finishDraft(loaded: PreviewUiState.Loaded) {
         val draft = draftListContent
         draftListContent = null
         if (draft == null || draft == listContent) {
@@ -249,20 +308,45 @@ class PreviewViewModel(
         uploadAndAdvance()
     }
 
-    fun setPickerRange(from: Int, to: Int) {
+    /** Moves "From" — season numbers below the show's first season are the "X" (null) sentinel. */
+    fun setPickerFrom(value: Int?) {
         val loaded = _uiState.value as? PreviewUiState.Loaded ?: return
-        val seasonNumbers = loaded.title.seasons.map { it.seasonNumber }
-        val minSeason = seasonNumbers.minOrNull() ?: 1
-        val maxSeason = seasonNumbers.maxOrNull() ?: 1
-        val clampedFrom = from.coerceIn(minSeason, maxSeason)
-        val clampedTo = to.coerceIn(clampedFrom, maxSeason)
-        _uiState.value = loaded.copy(pickerFrom = clampedFrom, pickerTo = clampedTo)
+        val (minSeason, maxSeason) = seasonBounds(loaded)
+        val clamped = value?.coerceIn(minSeason, maxSeason)
+        val to = loaded.pickerTo
+        val adjusted = if (clamped != null && to != null && clamped > to) to else clamped
+        _uiState.value = loaded.copy(pickerFrom = adjusted)
     }
 
-    /** Tapping a tier in the picker stages that range immediately (local only, no upload). */
-    fun selectTierForCurrentRange(tier: Int) {
+    /** Moves "To" — season numbers above the show's last season are the "X" (null) sentinel. */
+    fun setPickerTo(value: Int?) {
         val loaded = _uiState.value as? PreviewUiState.Loaded ?: return
-        stageRating(tier, loaded.pickerFrom, loaded.pickerTo, loaded.editingSegment)
+        val (minSeason, maxSeason) = seasonBounds(loaded)
+        val clamped = value?.coerceIn(minSeason, maxSeason)
+        val from = loaded.pickerFrom
+        val adjusted = if (clamped != null && from != null && clamped < from) from else clamped
+        _uiState.value = loaded.copy(pickerTo = adjusted)
+    }
+
+    /**
+     * Tapping a tier in the picker commits the pending range to the *previously* targeted tier
+     * (the one long-pressed, or last tapped), then makes the tapped tier the new target with a
+     * blank-slate range. If the previous target's From/To were left as "X"/"X", it's cleared —
+     * see [clearDraftForSkip] — rather than left with whatever it had before. Local only — no
+     * upload until [finalizeSeasonPicker].
+     */
+    fun selectTierForCurrentRange(newTier: Int) {
+        val loaded = _uiState.value as? PreviewUiState.Loaded ?: return
+        val targetTier = loaded.pickerTier
+        val resolved = targetTier?.let { resolvePickerRange(loaded.pickerFrom, loaded.pickerTo) }
+        if (targetTier == null || resolved == null) {
+            if (targetTier != null) clearDraftForSkip(loaded, targetTier, loaded.editingSegment)
+            val current = _uiState.value as? PreviewUiState.Loaded ?: loaded
+            _uiState.value = current.copy(pickerTier = newTier, pickerFrom = null, pickerTo = null, editingSegment = null)
+            return
+        }
+        val (start, end) = resolved
+        stageRating(targetTier, start, end, loaded.editingSegment, nextTier = newTier, thenFinalize = false)
     }
 
     // --- Rating (whole-show tap, or a season range from the picker) ---
@@ -300,7 +384,7 @@ class PreviewViewModel(
         val replacingRawLines = (overlapping.map { it.rawLine } + listOfNotNull(editing?.rawLine)).distinct()
 
         if (overlapping.isNotEmpty()) {
-            pendingRating = PendingRating(tier, newLine, replacingRawLines)
+            pendingRating = PendingRating(tier, newLine, replacingRawLines, carveEntries = emptyList(), nextTier = null, thenFinalize = false)
             viewModelScope.launch { _confirmOverlapReplace.emit(Unit) }
         } else {
             commitRating(tier, newLine, replacingRawLines)
@@ -318,41 +402,81 @@ class PreviewViewModel(
 
     // --- Draft staging within an open season picker (no upload, no persistence until finalizeSeasonPicker) ---
 
-    private fun stageRating(tier: Int, seasonStart: Int?, seasonEnd: Int?, editing: ShowSegment?) {
+    /**
+     * For each segment a new [newStart]-[newEnd] pick overlaps, keeps whatever seasons of that
+     * segment fall *outside* the new pick as separate entries at the segment's own original
+     * tier — so e.g. rerating season 3 out of an existing "Seasons 1-4" segment leaves that
+     * tier with "Seasons 1-2" and "Season 4" instead of losing the whole thing.
+     */
+    private fun buildCarveEntries(t: Title, overlapping: List<ShowSegment>, newStart: Int, newEnd: Int): List<Pair<Int, String>> =
+        overlapping.flatMap { segment ->
+            ListEntryParser.carveRemainder(segment, newStart, newEnd).map { (runStart, runEnd) ->
+                val yearStart = t.seasons.firstOrNull { it.seasonNumber == runStart }?.year ?: t.year
+                val yearEnd = t.seasons.firstOrNull { it.seasonNumber == runEnd }?.year
+                segment.tier to ListEntryParser.formatSegmentEntry(t.title, runStart, runEnd, yearStart, yearEnd)
+            }
+        }
+
+    private fun stageRating(
+        tier: Int,
+        seasonStart: Int,
+        seasonEnd: Int,
+        editing: ShowSegment?,
+        nextTier: Int?,
+        thenFinalize: Boolean
+    ) {
         val loaded = _uiState.value as? PreviewUiState.Loaded ?: return
         val t = loaded.title
         val base = draftListContent ?: listContent ?: ""
         val draftSegments = ListEntryParser.parseSegments(base, t.title)
-        val yearStart = seasonStart?.let { s -> t.seasons.firstOrNull { it.seasonNumber == s }?.year } ?: t.year
-        val yearEnd = seasonEnd?.let { e -> t.seasons.firstOrNull { it.seasonNumber == e }?.year }
+        val yearStart = t.seasons.firstOrNull { it.seasonNumber == seasonStart }?.year ?: t.year
+        val yearEnd = t.seasons.firstOrNull { it.seasonNumber == seasonEnd }?.year
         val newLine = ListEntryParser.formatSegmentEntry(t.title, seasonStart, seasonEnd, yearStart, yearEnd)
 
         val overlapping = draftSegments.filter { segment ->
-            segment.rawLine != editing?.rawLine &&
-                (seasonStart == null || seasonEnd == null || ListEntryParser.overlaps(segment, seasonStart, seasonEnd))
+            segment.rawLine != editing?.rawLine && ListEntryParser.overlaps(segment, seasonStart, seasonEnd)
         }
         val replacingRawLines = (overlapping.map { it.rawLine } + listOfNotNull(editing?.rawLine)).distinct()
+        val carveEntries = buildCarveEntries(t, overlapping, seasonStart, seasonEnd)
 
         if (overlapping.isNotEmpty()) {
-            pendingRating = PendingRating(tier, newLine, replacingRawLines)
+            pendingRating = PendingRating(tier, newLine, replacingRawLines, carveEntries, nextTier, thenFinalize)
             viewModelScope.launch { _confirmOverlapReplace.emit(Unit) }
         } else {
-            commitDraft(tier, newLine, replacingRawLines, base)
+            commitDraft(tier, newLine, replacingRawLines, carveEntries, base, nextTier, thenFinalize)
         }
     }
 
-    private fun commitDraft(tier: Int, newLine: String, replacingRawLines: List<String>, base: String) {
+    private fun commitDraft(
+        tier: Int,
+        newLine: String,
+        replacingRawLines: List<String>,
+        carveEntries: List<Pair<Int, String>>,
+        base: String,
+        nextTier: Int?,
+        thenFinalize: Boolean
+    ) {
         val loaded = _uiState.value as? PreviewUiState.Loaded ?: return
-        val updated = ListEntryParser.upsertSegment(base, tier, newLine, replacingRawLines)
+        val entries = listOf(tier to newLine) + carveEntries
+        val updated = ListEntryParser.upsertSegments(base, entries, replacingRawLines)
         draftListContent = updated
         val draftSegments = ListEntryParser.parseSegments(updated, loaded.title.title)
         val rating = draftSegments.singleOrNull()?.takeIf { it.seasonStart == null }?.tier
-        _uiState.value = loaded.copy(
-            segments = draftSegments,
-            rating = rating,
-            pickerTier = tier,
-            editingSegment = null
-        )
+
+        if (thenFinalize) {
+            val finalLoaded = loaded.copy(segments = draftSegments, rating = rating, pickerTier = null, editingSegment = null)
+            _uiState.value = finalLoaded
+            finishDraft(finalLoaded)
+        } else {
+            _uiState.value = loaded.copy(
+                segments = draftSegments,
+                rating = rating,
+                pickerTier = nextTier,
+                pickerFrom = null,
+                pickerTo = null,
+                editingSegment = null
+            )
+        }
     }
 
     /** User confirmed replacing the overlapping segment(s) shown in the warning dialog. */
@@ -361,7 +485,15 @@ class PreviewViewModel(
         pendingRating = null
         val loaded = _uiState.value as? PreviewUiState.Loaded ?: return
         if (loaded.isPickingRange) {
-            commitDraft(pending.tier, pending.newLine, pending.replacingRawLines, draftListContent ?: listContent ?: "")
+            commitDraft(
+                pending.tier,
+                pending.newLine,
+                pending.replacingRawLines,
+                pending.carveEntries,
+                draftListContent ?: listContent ?: "",
+                pending.nextTier,
+                pending.thenFinalize
+            )
         } else {
             commitRating(pending.tier, pending.newLine, pending.replacingRawLines)
         }
