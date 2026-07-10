@@ -11,6 +11,7 @@ import com.moviesrecommender.data.remote.dropbox.DropboxError
 import com.moviesrecommender.data.remote.dropbox.DropboxResult
 import com.moviesrecommender.data.remote.tmdb.TmdbResult
 import com.moviesrecommender.util.ToastManager
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -40,6 +41,7 @@ class RecommendViewModel : ViewModel() {
 
     private var hasNavigatedToPreview = false
     private var batchListContent: String? = null
+    private var batchJob: Job? = null
 
     init {
         app.recommendSkippedTitles.clear()
@@ -49,7 +51,7 @@ class RecommendViewModel : ViewModel() {
     }
 
     fun startBatch(attempt: Int = 1) {
-        viewModelScope.launch {
+        batchJob = viewModelScope.launch {
             _uiState.value = RecommendUiState.Loading(attempt)
             if (attempt == 1) {
                 app.recommendQueue = emptyList()
@@ -141,6 +143,10 @@ class RecommendViewModel : ViewModel() {
             hasNavigatedToPreview = true
             _navigateToPreview.emit(app.recommendQueue[0])
         }
+    }
+
+    fun cancel() {
+        batchJob?.cancel()
     }
 
     fun onScreenResumed() {

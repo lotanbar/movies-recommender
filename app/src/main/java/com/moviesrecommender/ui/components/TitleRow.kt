@@ -1,7 +1,10 @@
 package com.moviesrecommender.ui.components
 
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.border
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -25,17 +28,23 @@ import com.moviesrecommender.data.local.ListEntryParser
 import com.moviesrecommender.data.remote.tmdb.Title
 import com.moviesrecommender.ui.theme.RatingBadge
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun TitleRow(
     title: Title,
     rating: Int?,
     onClick: () -> Unit,
-    showAbsentBadge: Boolean = true
+    showAbsentBadge: Boolean = true,
+    assessedTier: Int? = null,
+    isAssessing: Boolean = false,
+    onLongPress: (() -> Unit)? = null
 ) {
+    val pulseAlpha = rememberAssessPulseAlpha(isAssessing)
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { onClick() }
+            .background(MaterialTheme.colorScheme.primary.copy(alpha = pulseAlpha))
+            .combinedClickable(onClick = onClick, onLongClick = onLongPress)
             .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -62,8 +71,10 @@ fun TitleRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-        if (rating != null || showAbsentBadge) {
-            RatingBadge(rating)
+        when {
+            rating != null -> RatingBadge(rating)
+            assessedTier != null -> AssessBadge(assessedTier)
+            showAbsentBadge -> RatingBadge(null)
         }
     }
 }
@@ -91,6 +102,24 @@ private fun RatingBadge(rating: Int?) {
             text = rating?.let { ListEntryParser.tierLabel(it) } ?: "✕",
             style = MaterialTheme.typography.labelLarge,
             color = textColor
+        )
+    }
+}
+
+/** Border-only circle marking a transient Assess-mode result — distinct from an actual saved [RatingBadge]. */
+@Composable
+private fun AssessBadge(tier: Int) {
+    Box(
+        modifier = Modifier
+            .size(32.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .border(BorderStroke(2.dp, RatingBadge), RoundedCornerShape(12.dp)),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = ListEntryParser.tierLabel(tier),
+            style = MaterialTheme.typography.labelLarge,
+            color = RatingBadge
         )
     }
 }

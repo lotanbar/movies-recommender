@@ -63,7 +63,9 @@ class OkHttpAnthropicApiClient(
         modelId: String,
         cachedContent: String,
         instruction: String,
-        system: String?
+        system: String?,
+        effort: String,
+        onUsage: ((UsageStats) -> Unit)?
     ): String = withContext(Dispatchers.IO) {
         val systemBlocks = system?.let {
             org.json.JSONArray().apply {
@@ -96,7 +98,9 @@ class OkHttpAnthropicApiClient(
 
         // "medium" effort trims Sonnet's default (high) thinking depth — faster,
         // cheaper, and tends to make fewer/more-consolidated tool calls too.
-        executeConversation(apiKey, modelId, systemBlocks, messages, effort = "medium")
+        // ASSESS passes "high" since it's a single-title judgment call, not a
+        // broad multi-search discovery pass, so the extra depth is cheap.
+        executeConversation(apiKey, modelId, systemBlocks, messages, effort = effort, onUsage = onUsage)
     }
 
     private suspend fun executeConversation(
@@ -104,8 +108,10 @@ class OkHttpAnthropicApiClient(
         modelId: String,
         system: Any?,
         messages: org.json.JSONArray,
-        effort: String? = null
+        effort: String? = null,
+        onUsage: ((UsageStats) -> Unit)? = null
     ): String {
+        val startedAt = System.currentTimeMillis()
         var response = requestWithWebSearch(apiKey, modelId, system, messages, effort)
         var content = response.getJSONArray("content")
         var inputTokens = 0L
@@ -136,7 +142,10 @@ class OkHttpAnthropicApiClient(
             continuations++
         }
 
-        logUsageAndCost(modelId, inputTokens, outputTokens, cacheWriteTokens, cacheReadTokens)
+        val durationMs = System.currentTimeMillis() - startedAt
+        val cost = costUsd(modelId, inputTokens, outputTokens, cacheWriteTokens, cacheReadTokens)
+        logUsage(modelId, inputTokens, outputTokens, cacheWriteTokens, cacheReadTokens, cost)
+        onUsage?.invoke(UsageStats(inputTokens, outputTokens, cacheWriteTokens, cacheReadTokens, cost, durationMs))
 
         val text = StringBuilder()
         for (i in 0 until content.length()) {
@@ -148,21 +157,31 @@ class OkHttpAnthropicApiClient(
     }
 
     /** Per-MTok pricing, current intro rates where applicable (see platform.claude.com/docs/en/pricing). */
-    private fun logUsageAndCost(
+    private fun costUsd(
         modelId: String,
         inputTokens: Long,
         outputTokens: Long,
         cacheWriteTokens: Long,
         cacheReadTokens: Long
-    ) {
+    ): Double {
         val (inputRate, outputRate) = when {
             modelId.contains("haiku") -> 1.00 to 5.00
             else -> 2.00 to 10.00 // Sonnet 5 intro pricing
         }
-        val cost = (inputTokens * inputRate +
+        return (inputTokens * inputRate +
             outputTokens * outputRate +
             cacheWriteTokens * inputRate * 1.25 +
             cacheReadTokens * inputRate * 0.1) / 1_000_000.0
+    }
+
+    private fun logUsage(
+        modelId: String,
+        inputTokens: Long,
+        outputTokens: Long,
+        cacheWriteTokens: Long,
+        cacheReadTokens: Long,
+        cost: Double
+    ) {
         Log.d(
             "AnthropicUsage",
             "model=$modelId input=$inputTokens output=$outputTokens cacheWrite=$cacheWriteTokens cacheRead=$cacheReadTokens cost=$${"%.4f".format(cost)}"

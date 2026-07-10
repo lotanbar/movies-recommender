@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
@@ -65,18 +66,33 @@ fun ActionsScreen(navController: NavHostController) {
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
     ) {
-        IconButton(
-            onClick = { navController.navigate(Screen.Setup.createRoute(showContinueAnyway = false)) },
+        Row(
             modifier = Modifier
                 .align(Alignment.BottomEnd)
-                .padding(8.dp)
-                .size(48.dp)
+                .padding(8.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(
-                imageVector = Icons.Filled.Settings,
-                contentDescription = "Setup",
+            IconButton(
+                onClick = { navController.navigate(Screen.Usage.route) },
                 modifier = Modifier.size(48.dp)
-            )
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.BarChart,
+                    contentDescription = "Usage stats",
+                    modifier = Modifier.size(48.dp)
+                )
+            }
+
+            IconButton(
+                onClick = { navController.navigate(Screen.Setup.createRoute(showContinueAnyway = false)) },
+                modifier = Modifier.size(48.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Settings,
+                    contentDescription = "Setup",
+                    modifier = Modifier.size(48.dp)
+                )
+            }
         }
 
         Column(

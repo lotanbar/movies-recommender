@@ -6,6 +6,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -71,6 +72,8 @@ import coil.compose.AsyncImage
 import com.moviesrecommender.data.local.ListEntryParser
 import com.moviesrecommender.data.local.ShowSegment
 import com.moviesrecommender.data.remote.tmdb.MediaType
+import com.moviesrecommender.ui.components.BusyOverlay
+import com.moviesrecommender.ui.components.rememberAssessPulseAlpha
 import com.moviesrecommender.util.ToastManager
 
 /** Matches the squared-off corner style of the main Actions screen buttons. */
@@ -87,6 +90,8 @@ fun PreviewScreen(
         factory = PreviewViewModelFactory(tmdbId, mediaType, source)
     )
     val uiState by viewModel.uiState.collectAsState()
+    val isAssessing by viewModel.isAssessing.collectAsState()
+    val assessedTier by viewModel.assessedTier.collectAsState()
 
     // Recommend mode: after rating/skip, navigate to next item or pop back to RecommendScreen for new batch
     if (source == "recommend") {
@@ -103,11 +108,31 @@ fun PreviewScreen(
         }
     }
 
-    // Recommend: back gesture goes straight to the main Actions screen.
-    if (source == "recommend") {
-        BackHandler {
+    // While assessing, back shows a cancel confirmation instead of navigating.
+    // Otherwise, in Recommend mode, back gesture goes straight to the main Actions screen.
+    var showAssessCancelConfirm by remember { mutableStateOf(false) }
+    BackHandler(enabled = isAssessing || source == "recommend") {
+        if (isAssessing) {
+            showAssessCancelConfirm = true
+        } else {
             navController.popBackStack(Screen.Actions.route, inclusive = false)
         }
+    }
+    if (showAssessCancelConfirm) {
+        AlertDialog(
+            onDismissRequest = { showAssessCancelConfirm = false },
+            title = { Text("Cancel assessment?") },
+            text = { Text("This will stop the current assessment.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showAssessCancelConfirm = false
+                    viewModel.cancelAssess()
+                }) { Text("Yes, cancel") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAssessCancelConfirm = false }) { Text("Keep going") }
+            }
+        )
     }
 
     var showFetchMoreConfirm by remember { mutableStateOf(false) }
@@ -160,6 +185,7 @@ fun PreviewScreen(
         )
     }
 
+    Box(modifier = Modifier.fillMaxSize()) {
     Scaffold(
         bottomBar = {
             val loaded = uiState as? PreviewUiState.Loaded
@@ -187,6 +213,7 @@ fun PreviewScreen(
                             segmentLabels = segmentLabelsByTier(loaded.segments),
                             isUploading = loaded.isUploading,
                             uploadError = loaded.uploadError,
+                            assessedTier = assessedTier,
                             onSetRating = viewModel::setRating,
                             onClearRating = viewModel::clearRating,
                             onLongPressTier = { tier ->
@@ -237,16 +264,20 @@ fun PreviewScreen(
                         LoadedContent(
                             state = state,
                             source = source,
+                            isAssessing = isAssessing,
                             hasPrevious = viewModel::hasPrevious,
                             onNavigateBack = viewModel::navigateBack,
                             onDoubleTap = viewModel::onDoubleTap,
                             onSkip = viewModel::onSkip,
+                            onLongPressAssess = viewModel::onLongPressAssessPoster,
                             modifier = Modifier.weight(1f).fillMaxWidth()
                         )
                     }
                 }
             }
         }
+    }
+    BusyOverlay(isBusy = isAssessing, message = "Assessment in Progress... Plz wait")
     }
 }
 
@@ -255,10 +286,12 @@ fun PreviewScreen(
 private fun LoadedContent(
     state: PreviewUiState.Loaded,
     source: String,
+    isAssessing: Boolean,
     hasPrevious: () -> Boolean,
     onNavigateBack: () -> Unit,
     onDoubleTap: () -> Unit,
     onSkip: () -> Unit,
+    onLongPressAssess: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val title = state.title
@@ -298,7 +331,8 @@ private fun LoadedContent(
                 showBack && page == 0 -> BackTriggerPage(modifier = Modifier.fillMaxSize())
                 showBack && page == 2 -> SkipTriggerPage(modifier = Modifier.fillMaxSize())
                 else -> {
-                    // Poster page — single tap opens IMDB
+                    // Poster page — single tap opens IMDB, long-press triggers Assess mode
+                    val pulseAlpha = rememberAssessPulseAlpha(isAssessing)
                     Box(
                         modifier = Modifier
                             .padding(start = 8.dp, end = 8.dp, top = 4.dp, bottom = 2.dp)
@@ -309,10 +343,7 @@ private fun LoadedContent(
                                 indication = null,
                                 interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
                                 onClick = { title.imdbId?.let { openUrl("https://www.imdb.com/title/$it/") } },
-                                onLongClick = {
-                                    clipboardManager.setText(AnnotatedString(title.title))
-                                    ToastManager.show("\"${title.title}\" copied to clipboard")
-                                },
+                                onLongClick = onLongPressAssess,
                                 onDoubleClick = onDoubleTap
                             )
                     ) {
@@ -321,6 +352,11 @@ private fun LoadedContent(
                             contentDescription = title.title,
                             contentScale = ContentScale.FillWidth,
                             modifier = Modifier.fillMaxWidth()
+                        )
+                        Box(
+                            modifier = Modifier
+                                .matchParentSize()
+                                .background(MaterialTheme.colorScheme.primary.copy(alpha = pulseAlpha))
                         )
                     }
                 }
@@ -335,7 +371,17 @@ private fun LoadedContent(
             contentAlignment = Alignment.Center
         ) {
         Row(
-            modifier = Modifier.padding(start = 16.dp, end = 16.dp),
+            modifier = Modifier
+                .padding(start = 16.dp, end = 16.dp)
+                .combinedClickable(
+                    indication = null,
+                    interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                    onClick = {},
+                    onLongClick = {
+                        clipboardManager.setText(AnnotatedString(title.title))
+                        ToastManager.show("Copied to clipboard")
+                    }
+                ),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
@@ -350,10 +396,6 @@ private fun LoadedContent(
                 modifier = Modifier
                     .weight(1f)
                     .align(Alignment.CenterVertically)
-                    .clickable {
-                        clipboardManager.setText(AnnotatedString(title.title))
-                        ToastManager.show("Copied to clipboard")
-                    }
             )
             title.runtime?.let { mins ->
                 val h = mins / 60
@@ -447,7 +489,8 @@ private fun TierSelector(
     onSelect: (Int) -> Unit,
     onClear: (() -> Unit)? = null,
     onLongPress: ((Int) -> Unit)? = null,
-    segmentLabels: Map<Int, String> = emptyMap()
+    segmentLabels: Map<Int, String> = emptyMap(),
+    assessedTier: Int? = null
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -465,6 +508,7 @@ private fun TierSelector(
                 }
                 RatingCircleButton(
                     isActive = n in activeTiers,
+                    isAssessed = n == assessedTier,
                     onClick = {
                         if (activeTiers == setOf(n) && onClear != null) onClear() else onSelect(n)
                     },
@@ -594,6 +638,7 @@ private fun RatingBottomBar(
     segmentLabels: Map<Int, String> = emptyMap(),
     isUploading: Boolean,
     uploadError: Boolean,
+    assessedTier: Int? = null,
     onSetRating: (Int) -> Unit,
     onClearRating: () -> Unit,
     onLongPressTier: ((Int) -> Unit)? = null
@@ -612,7 +657,8 @@ private fun RatingBottomBar(
                 onSelect = onSetRating,
                 onClear = onClearRating,
                 onLongPress = onLongPressTier,
-                segmentLabels = segmentLabels
+                segmentLabels = segmentLabels,
+                assessedTier = assessedTier
             )
             when {
                 isUploading -> Row(
@@ -640,6 +686,7 @@ private fun RatingBottomBar(
 @Composable
 private fun RatingCircleButton(
     isActive: Boolean,
+    isAssessed: Boolean = false,
     onClick: () -> Unit,
     onLongClick: (() -> Unit)? = null,
     content: @Composable () -> Unit
@@ -653,6 +700,10 @@ private fun RatingCircleButton(
             .size(56.dp)
             .clip(APP_CORNER_SHAPE)
             .background(bg)
+            .then(
+                if (isAssessed) Modifier.border(BorderStroke(2.dp, MaterialTheme.colorScheme.primary), APP_CORNER_SHAPE)
+                else Modifier
+            )
             .combinedClickable(onClick = onClick, onLongClick = onLongClick),
         contentAlignment = Alignment.Center
     ) {

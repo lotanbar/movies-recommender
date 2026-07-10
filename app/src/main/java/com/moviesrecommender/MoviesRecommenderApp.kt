@@ -4,6 +4,7 @@ import android.app.Application
 import com.moviesrecommender.data.local.AppDatabase
 import com.moviesrecommender.data.local.LocalStorageService
 import com.moviesrecommender.data.local.SharedPrefsTokenStore
+import com.moviesrecommender.data.local.UsageStatsService
 import com.moviesrecommender.data.remote.anthropic.AnthropicAuthManager
 import com.moviesrecommender.data.remote.anthropic.AnthropicService
 import com.moviesrecommender.data.remote.anthropic.OkHttpAnthropicApiClient
@@ -28,9 +29,13 @@ class MoviesRecommenderApp : Application() {
         DropboxService(DropboxAuthManager(tokenStore), OkHttpDropboxApiClient())
     }
 
+    val usageStatsService: UsageStatsService by lazy {
+        UsageStatsService(AppDatabase.getInstance(this).usageDao())
+    }
+
     val anthropicService: AnthropicService by lazy {
         val systemPrompt = resources.openRawResource(R.raw.movies_prompt).bufferedReader().use { it.readText() }
-        AnthropicService(AnthropicAuthManager(tokenStore), OkHttpAnthropicApiClient(), systemPrompt)
+        AnthropicService(AnthropicAuthManager(tokenStore), OkHttpAnthropicApiClient(), systemPrompt, usageStatsService)
     }
 
     val tmdbService: TmdbService by lazy {

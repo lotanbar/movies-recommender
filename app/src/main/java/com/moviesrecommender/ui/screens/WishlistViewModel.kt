@@ -3,11 +3,16 @@ package com.moviesrecommender.ui.screens
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.moviesrecommender.MoviesRecommenderApp
+import com.moviesrecommender.data.local.ListEntryParser
+import com.moviesrecommender.data.remote.anthropic.AnthropicError
+import com.moviesrecommender.data.remote.anthropic.AnthropicResult
+import com.moviesrecommender.data.remote.dropbox.DropboxError
 import com.moviesrecommender.data.remote.dropbox.DropboxResult
 import com.moviesrecommender.data.remote.tmdb.MediaType
 import com.moviesrecommender.data.remote.tmdb.Title
 import com.moviesrecommender.data.remote.tmdb.TmdbResult
 import com.moviesrecommender.util.ToastManager
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -42,6 +47,16 @@ class WishlistViewModel : ViewModel() {
 
     private val _pendingRemovalId = MutableStateFlow<Int?>(null)
     val pendingRemovalId: StateFlow<Int?> = _pendingRemovalId.asStateFlow()
+
+    private var listContent: String? = null
+
+    private val _assessingId = MutableStateFlow<Int?>(null)
+    val assessingId: StateFlow<Int?> = _assessingId.asStateFlow()
+
+    private val _assessedTiers = MutableStateFlow<Map<Int, Int>>(emptyMap())
+    val assessedTiers: StateFlow<Map<Int, Int>> = _assessedTiers.asStateFlow()
+
+    private var assessJob: Job? = null
 
     init {
         viewModelScope.launch { load() }
@@ -81,13 +96,48 @@ class WishlistViewModel : ViewModel() {
             }
         }.awaitAll().filterNotNull()
 
-        val listContent = listDeferred.await()
+        val downloadedListContent = listDeferred.await()
+        listContent = downloadedListContent
         val items = titlesDeferred.map { title ->
-            WishlistItem(title, listContent?.let { SearchViewModel.parseRating(it, title.title) })
+            WishlistItem(title, downloadedListContent?.let { SearchViewModel.parseRating(it, title.title) })
         }
 
         val conflicts = items.filter { it.rating != null }
         _uiState.value = WishlistUiState.Loaded(items, conflicts)
+    }
+
+    fun onLongPressAssess(tmdbId: Int, title: String, year: Int, currentRating: Int?) {
+        if (currentRating != null) {
+            ToastManager.show("Already rated as ${ListEntryParser.tierLabel(currentRating)} — no need to assess.")
+            return
+        }
+        if (_assessingId.value != null) return
+        _assessingId.value = tmdbId
+        assessJob = viewModelScope.launch {
+            val content = listContent ?: app.cachedListContent ?: run {
+                when (val r = dropboxService.downloadList()) {
+                    is DropboxResult.Success -> r.value.also { listContent = it; app.cachedListContent = it }
+                    is DropboxResult.Failure -> {
+                        _assessingId.value = null
+                        ToastManager.show(r.error.toMessage())
+                        return@launch
+                    }
+                }
+            }
+            val result = app.anthropicService.sendPrompt("$title ($year) assess", content)
+            _assessingId.value = null
+            when (result) {
+                is AnthropicResult.Success -> ListEntryParser.parseAssessTier(result.value)?.let {
+                    _assessedTiers.value = _assessedTiers.value + (tmdbId to it)
+                }
+                is AnthropicResult.Failure -> ToastManager.show(result.error.toMessage())
+            }
+        }
+    }
+
+    fun cancelAssess() {
+        assessJob?.cancel()
+        _assessingId.value = null
     }
 
     fun onStarTap(tmdbId: Int) {
@@ -114,4 +164,22 @@ class WishlistViewModel : ViewModel() {
             ToastManager.show("${item.title.title} is already in your list.")
         }
     }
+}
+
+private fun DropboxError.toMessage(): String = when (this) {
+    DropboxError.NoInternet -> "Download failed: No internet connection."
+    DropboxError.TokenExpired -> "Dropbox session expired - please re-authenticate."
+    DropboxError.FileNotFound -> "List file not found. Please update the path in Setup."
+    DropboxError.StorageFull -> "Dropbox storage is full."
+    DropboxError.RateLimit -> "Too many requests. Try again shortly."
+    is DropboxError.Unknown -> "Download failed: $message"
+}
+
+private fun AnthropicError.toMessage(): String = when (this) {
+    AnthropicError.ApiKeyMissing -> "Claude API key not configured. Please go to Setup."
+    AnthropicError.ModelNotSelected -> "Claude model not selected. Please go to Setup."
+    AnthropicError.InvalidApiKey -> "Invalid Claude API key. Please go to Setup."
+    AnthropicError.NoInternet -> "Claude request failed: No internet connection."
+    AnthropicError.NoSonnetModelFound -> "No Claude model found. Please go to Setup."
+    is AnthropicError.ApiError -> "Claude request failed: $message"
 }

@@ -1,9 +1,15 @@
 package com.moviesrecommender.data.remote.anthropic
 
+import com.moviesrecommender.data.local.UsageStatsService
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+
 class AnthropicService(
     val authManager: AnthropicAuthManager,
     private val apiClient: AnthropicApiClient,
-    private val recommendSystemPrompt: String
+    private val recommendSystemPrompt: String,
+    private val usageStatsService: UsageStatsService? = null
 ) {
     companion object {
         private const val MODEL_SONNET = "claude-sonnet-5"
@@ -40,13 +46,31 @@ class AnthropicService(
     /** [listContent] and the system prompt are cached (identical across retries); [mode] varies per request. */
     suspend fun sendPrompt(mode: String, listContent: String): AnthropicResult<String> {
         return try {
+            val isAssess = mode.endsWith("assess")
+            val effort = "high"
+            val statsMode = if (isAssess) "assess" else "recommend"
             val response = apiClient.sendCachedMessage(
                 requireApiKey(),
                 effectiveModel(),
                 listContent,
                 mode,
-                recommendSystemPrompt
-            )
+                recommendSystemPrompt,
+                effort
+            ) { stats ->
+                usageStatsService?.let { service ->
+                    CoroutineScope(Dispatchers.IO).launch {
+                        service.record(
+                            statsMode,
+                            stats.inputTokens,
+                            stats.outputTokens,
+                            stats.cacheWriteTokens,
+                            stats.cacheReadTokens,
+                            stats.costUsd,
+                            stats.durationMs
+                        )
+                    }
+                }
+            }
             AnthropicResult.Success(response.trim())
         } catch (e: AnthropicApiException) {
             AnthropicResult.Failure(e.toAnthropicError())

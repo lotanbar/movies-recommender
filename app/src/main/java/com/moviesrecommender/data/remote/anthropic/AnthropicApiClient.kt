@@ -2,6 +2,15 @@ package com.moviesrecommender.data.remote.anthropic
 
 data class ModelInfo(val id: String, val createdAt: String)
 
+data class UsageStats(
+    val inputTokens: Long,
+    val outputTokens: Long,
+    val cacheWriteTokens: Long,
+    val cacheReadTokens: Long,
+    val costUsd: Double,
+    val durationMs: Long
+)
+
 interface AnthropicApiClient {
     suspend fun fetchModels(apiKey: String): List<ModelInfo>
     suspend fun sendMessage(
@@ -26,7 +35,9 @@ interface AnthropicApiClient {
         modelId: String,
         cachedContent: String,
         instruction: String,
-        system: String? = null
+        system: String? = null,
+        effort: String = "medium",
+        onUsage: ((UsageStats) -> Unit)? = null
     ): String
 }
 

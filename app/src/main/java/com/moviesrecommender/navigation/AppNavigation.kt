@@ -13,6 +13,7 @@ import com.moviesrecommender.ui.screens.RecommendScreen
 import com.moviesrecommender.ui.screens.SearchScreen
 import com.moviesrecommender.ui.screens.SetupScreen
 import com.moviesrecommender.ui.screens.SplashScreen
+import com.moviesrecommender.ui.screens.UsageScreen
 import com.moviesrecommender.ui.screens.WishlistScreen
 
 @Composable
@@ -35,6 +36,9 @@ fun AppNavigation(navController: NavHostController, appViewModel: AppViewModel) 
         }
         composable(Screen.Actions.route) {
             ActionsScreen(navController)
+        }
+        composable(Screen.Usage.route) {
+            UsageScreen(navController)
         }
         composable(Screen.Search.route) {
             SearchScreen(navController)

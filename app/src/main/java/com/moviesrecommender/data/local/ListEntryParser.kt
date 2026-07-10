@@ -39,6 +39,16 @@ object ListEntryParser {
         return if (tier % 10 == 5) "$base+" else "$base"
     }
 
+    private val ASSESS_REGEX = Regex("""([1-4])(\+)?""")
+
+    /** Parses a Claude ASSESS-mode response ("3", "2+", …) into an encoded tier value, or null. */
+    fun parseAssessTier(response: String): Int? {
+        val match = ASSESS_REGEX.find(response) ?: return null
+        val base = match.groupValues[1].toInt()
+        val plus = match.groupValues[2] == "+"
+        return if (base == 2 && plus) 25 else base * 10
+    }
+
     /** The tier value of a section header line ("TIER 4", "TIER 2+", "RATING: 4", …), or null. */
     fun headerTier(line: String): Int? {
         val match = HEADER_REGEX.find(line.trim()) ?: return null

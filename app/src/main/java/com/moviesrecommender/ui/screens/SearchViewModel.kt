@@ -4,12 +4,16 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.moviesrecommender.MoviesRecommenderApp
 import com.moviesrecommender.data.local.ListEntryParser
+import com.moviesrecommender.data.remote.anthropic.AnthropicError
+import com.moviesrecommender.data.remote.anthropic.AnthropicResult
 import com.moviesrecommender.data.remote.dropbox.DropboxError
 import com.moviesrecommender.data.remote.dropbox.DropboxResult
 import com.moviesrecommender.data.remote.tmdb.MediaType
 import com.moviesrecommender.data.remote.tmdb.Title
 import com.moviesrecommender.data.remote.tmdb.TmdbResult
+import com.moviesrecommender.util.ToastManager
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -53,6 +57,14 @@ class SearchViewModel : ViewModel() {
     private var currentPage = 0
     private var totalPages = 1
     private var activeQuery = ""
+
+    private val _assessingId = MutableStateFlow<Int?>(null)
+    val assessingId: StateFlow<Int?> = _assessingId.asStateFlow()
+
+    private val _assessedTiers = MutableStateFlow<Map<Int, Int>>(emptyMap())
+    val assessedTiers: StateFlow<Map<Int, Int>> = _assessedTiers.asStateFlow()
+
+    private var assessJob: Job? = null
 
     init {
         viewModelScope.launch { downloadList() }
@@ -160,6 +172,40 @@ class SearchViewModel : ViewModel() {
     private fun Title.withRating() =
         TitleWithRating(this, listContent?.let { parseRating(it, title) })
 
+    fun onLongPressAssess(tmdbId: Int, title: String, year: Int, currentRating: Int?) {
+        if (currentRating != null) {
+            ToastManager.show("Already rated as ${ListEntryParser.tierLabel(currentRating)} — no need to assess.")
+            return
+        }
+        if (_assessingId.value != null) return
+        _assessingId.value = tmdbId
+        assessJob = viewModelScope.launch {
+            val content = listContent ?: app.cachedListContent ?: run {
+                when (val r = dropboxService.downloadList()) {
+                    is DropboxResult.Success -> r.value.also { listContent = it; app.cachedListContent = it }
+                    is DropboxResult.Failure -> {
+                        _assessingId.value = null
+                        ToastManager.show(r.error.toMessage())
+                        return@launch
+                    }
+                }
+            }
+            val result = app.anthropicService.sendPrompt("$title ($year) assess", content)
+            _assessingId.value = null
+            when (result) {
+                is AnthropicResult.Success -> ListEntryParser.parseAssessTier(result.value)?.let {
+                    _assessedTiers.value = _assessedTiers.value + (tmdbId to it)
+                }
+                is AnthropicResult.Failure -> ToastManager.show(result.error.toMessage())
+            }
+        }
+    }
+
+    fun cancelAssess() {
+        assessJob?.cancel()
+        _assessingId.value = null
+    }
+
     companion object {
         /**
          * Best (numerically highest) tier among all segments matching [titleToFind] — a show
@@ -178,4 +224,13 @@ private fun DropboxError.toMessage(): String = when (this) {
     DropboxError.StorageFull -> "Dropbox storage is full."
     DropboxError.RateLimit -> "Too many requests. Try again shortly."
     is DropboxError.Unknown -> "Download failed: $message"
+}
+
+private fun AnthropicError.toMessage(): String = when (this) {
+    AnthropicError.ApiKeyMissing -> "Claude API key not configured. Please go to Setup."
+    AnthropicError.ModelNotSelected -> "Claude model not selected. Please go to Setup."
+    AnthropicError.InvalidApiKey -> "Invalid Claude API key. Please go to Setup."
+    AnthropicError.NoInternet -> "Claude request failed: No internet connection."
+    AnthropicError.NoSonnetModelFound -> "No Claude model found. Please go to Setup."
+    is AnthropicError.ApiError -> "Claude request failed: $message"
 }

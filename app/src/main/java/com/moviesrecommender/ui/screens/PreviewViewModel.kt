@@ -6,12 +6,15 @@ import androidx.lifecycle.viewModelScope
 import com.moviesrecommender.MoviesRecommenderApp
 import com.moviesrecommender.data.local.ListEntryParser
 import com.moviesrecommender.data.local.ShowSegment
+import com.moviesrecommender.data.remote.anthropic.AnthropicError
+import com.moviesrecommender.data.remote.anthropic.AnthropicResult
 import com.moviesrecommender.data.remote.dropbox.DropboxError
 import com.moviesrecommender.data.remote.dropbox.DropboxResult
 import com.moviesrecommender.data.remote.tmdb.MediaType
 import com.moviesrecommender.data.remote.tmdb.Title
 import com.moviesrecommender.data.remote.tmdb.TmdbResult
 import com.moviesrecommender.util.ToastManager
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -91,6 +94,14 @@ class PreviewViewModel(
     // Emitted when the current pick would overlap one or more existing segments for this show.
     private val _confirmOverlapReplace = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     val confirmOverlapReplace: SharedFlow<Unit> = _confirmOverlapReplace.asSharedFlow()
+
+    private val _isAssessing = MutableStateFlow(false)
+    val isAssessing: StateFlow<Boolean> = _isAssessing.asStateFlow()
+
+    private val _assessedTier = MutableStateFlow<Int?>(null)
+    val assessedTier: StateFlow<Int?> = _assessedTier.asStateFlow()
+
+    private var assessJob: Job? = null
 
     init {
         val preloaded = app.cachedTitles[tmdbId]
@@ -512,6 +523,53 @@ class PreviewViewModel(
             if (source == "recommend") advanceRecommendQueue()
         }
     }
+
+    fun onLongPressAssessPoster() {
+        val loaded = _uiState.value as? PreviewUiState.Loaded ?: return
+        if (loaded.segments.isNotEmpty()) {
+            val ratedLabel = loaded.rating?.let { ListEntryParser.tierLabel(it) }
+                ?: loaded.segments.first().let { ListEntryParser.tierLabel(it.tier) }
+            ToastManager.show("Already rated as $ratedLabel — no need to assess.")
+            return
+        }
+        if (_isAssessing.value) return
+        _isAssessing.value = true
+        val title = loaded.title
+        assessJob = viewModelScope.launch {
+            val content = listContent ?: app.cachedListContent ?: run {
+                when (val r = dropboxService.downloadList()) {
+                    is DropboxResult.Success -> r.value.also { listContent = it; app.cachedListContent = it }
+                    is DropboxResult.Failure -> {
+                        _isAssessing.value = false
+                        ToastManager.show(r.error.toMessage())
+                        return@launch
+                    }
+                }
+            }
+            val result = app.anthropicService.sendPrompt("${title.title} (${title.year}) assess", content)
+            _isAssessing.value = false
+            when (result) {
+                is AnthropicResult.Success -> ListEntryParser.parseAssessTier(result.value)?.let {
+                    _assessedTier.value = it
+                }
+                is AnthropicResult.Failure -> ToastManager.show(result.error.toMessage())
+            }
+        }
+    }
+
+    fun cancelAssess() {
+        assessJob?.cancel()
+        _isAssessing.value = false
+    }
+}
+
+private fun AnthropicError.toMessage(): String = when (this) {
+    AnthropicError.ApiKeyMissing -> "Claude API key not configured. Please go to Setup."
+    AnthropicError.ModelNotSelected -> "Claude model not selected. Please go to Setup."
+    AnthropicError.InvalidApiKey -> "Invalid Claude API key. Please go to Setup."
+    AnthropicError.NoInternet -> "Claude request failed: No internet connection."
+    AnthropicError.NoSonnetModelFound -> "No Claude model found. Please go to Setup."
+    is AnthropicError.ApiError -> "Claude request failed: $message"
 }
 
 class PreviewViewModelFactory(

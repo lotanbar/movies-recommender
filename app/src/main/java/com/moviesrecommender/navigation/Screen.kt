@@ -6,6 +6,7 @@ sealed class Screen(val route: String) {
         fun createRoute(showContinueAnyway: Boolean) = "setup/$showContinueAnyway"
     }
     object Actions   : Screen("actions")
+    object Usage     : Screen("usage")
     object Search    : Screen("search")
     object Recommend : Screen("recommend")
     object Wishlist  : Screen("wishlist")
