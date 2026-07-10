@@ -96,10 +96,6 @@ class OkHttpAnthropicApiClient(
             })
         }
 
-        // "medium" effort trims Sonnet's default (high) thinking depth — faster,
-        // cheaper, and tends to make fewer/more-consolidated tool calls too.
-        // ASSESS passes "high" since it's a single-title judgment call, not a
-        // broad multi-search discovery pass, so the extra depth is cheap.
         executeConversation(apiKey, modelId, systemBlocks, messages, effort = effort, onUsage = onUsage)
     }
 

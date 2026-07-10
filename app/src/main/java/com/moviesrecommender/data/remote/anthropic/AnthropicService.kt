@@ -1,5 +1,6 @@
 package com.moviesrecommender.data.remote.anthropic
 
+import android.util.Log
 import com.moviesrecommender.data.local.UsageStatsService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -47,7 +48,7 @@ class AnthropicService(
     suspend fun sendPrompt(mode: String, listContent: String): AnthropicResult<String> {
         return try {
             val isAssess = mode.endsWith("assess")
-            val effort = "high"
+            val effort = if (isAssess) "medium" else "high"
             val statsMode = if (isAssess) "assess" else "recommend"
             val response = apiClient.sendCachedMessage(
                 requireApiKey(),
@@ -81,5 +82,8 @@ class AnthropicService(
 internal fun AnthropicApiException.toAnthropicError(): AnthropicError = when (this) {
     is AnthropicApiException.Unauthorized -> AnthropicError.InvalidApiKey
     is AnthropicApiException.NoNetwork -> AnthropicError.NoInternet
-    is AnthropicApiException.ServerError -> AnthropicError.ApiError(message ?: "Unknown error")
+    is AnthropicApiException.ServerError -> {
+        Log.e("Anthropic", "API error: $message")
+        AnthropicError.ApiError(message ?: "Unknown error")
+    }
 }
