@@ -15,6 +15,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Timer
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -40,6 +43,7 @@ fun TitleRow(
     onLongPress: (() -> Unit)? = null
 ) {
     val pulseAlpha = rememberAssessPulseAlpha(isAssessing)
+    val elapsedSeconds = rememberElapsedSeconds(isAssessing)
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -73,9 +77,35 @@ fun TitleRow(
         }
         when {
             rating != null -> RatingBadge(rating)
+            isAssessing -> AssessTimerChip(elapsedSeconds)
             assessedTier != null -> AssessBadge(assessedTier)
             showAbsentBadge -> RatingBadge(null)
         }
+    }
+}
+
+/** Live "how long has this row's assess call been running" pill, shown in place of the badge. */
+@Composable
+private fun AssessTimerChip(elapsedSeconds: Int) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f))
+            .padding(horizontal = 8.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Icon(
+            imageVector = Icons.Outlined.Timer,
+            contentDescription = "Assessing",
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(14.dp)
+        )
+        Text(
+            text = formatElapsed(elapsedSeconds),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.primary
+        )
     }
 }
 

@@ -73,7 +73,9 @@ import com.moviesrecommender.data.local.ListEntryParser
 import com.moviesrecommender.data.local.ShowSegment
 import com.moviesrecommender.data.remote.tmdb.MediaType
 import com.moviesrecommender.ui.components.BusyOverlay
+import com.moviesrecommender.ui.components.formatElapsed
 import com.moviesrecommender.ui.components.rememberAssessPulseAlpha
+import com.moviesrecommender.ui.components.rememberElapsedSeconds
 import com.moviesrecommender.util.ToastManager
 
 /** Matches the squared-off corner style of the main Actions screen buttons. */
@@ -259,6 +261,16 @@ fun PreviewScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 textAlign = TextAlign.Center,
                                 modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                            )
+                        }
+                        if (isAssessing) {
+                            val elapsedSeconds = rememberElapsedSeconds(isAssessing)
+                            Text(
+                                text = formatElapsed(elapsedSeconds),
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.primary,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.fillMaxWidth().padding(top = 2.dp)
                             )
                         }
                         LoadedContent(

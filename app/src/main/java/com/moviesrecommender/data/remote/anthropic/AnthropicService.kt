@@ -48,7 +48,7 @@ class AnthropicService(
     suspend fun sendPrompt(mode: String, listContent: String): AnthropicResult<String> {
         return try {
             val isAssess = mode.endsWith("assess")
-            val effort = if (isAssess) "medium" else "high"
+            val effort = "medium"
             val statsMode = if (isAssess) "assess" else "recommend"
             val response = apiClient.sendCachedMessage(
                 requireApiKey(),
