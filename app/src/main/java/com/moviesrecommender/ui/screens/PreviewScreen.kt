@@ -267,7 +267,7 @@ fun PreviewScreen(
                             val elapsedSeconds = rememberElapsedSeconds(isAssessing)
                             Text(
                                 text = formatElapsed(elapsedSeconds),
-                                style = MaterialTheme.typography.labelLarge,
+                                style = MaterialTheme.typography.titleLarge,
                                 color = MaterialTheme.colorScheme.primary,
                                 textAlign = TextAlign.Center,
                                 modifier = Modifier.fillMaxWidth().padding(top = 2.dp)
@@ -375,16 +375,16 @@ private fun LoadedContent(
             }
         }
 
-        // Title banner, vertically centered in the space between the poster and the bottom bar
+        // Title banner, anchored just below the poster, away from the bottom rating bar
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f),
-            contentAlignment = Alignment.Center
+            contentAlignment = Alignment.TopCenter
         ) {
         Row(
             modifier = Modifier
-                .padding(start = 16.dp, end = 16.dp)
+                .padding(start = 16.dp, end = 16.dp, top = 12.dp)
                 .combinedClickable(
                     indication = null,
                     interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
