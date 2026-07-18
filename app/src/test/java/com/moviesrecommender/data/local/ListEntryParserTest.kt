@@ -66,6 +66,19 @@ class ListEntryParserTest {
         assertEquals(25, ListEntryParser.parseSegments(tierList, "Daredevil").single().tier)
     }
 
+    @Test
+    fun `parseSegments disambiguates two titles sharing a name by year`() {
+        val listContent = """
+            TIER 4
+            - Avatar: The Last Airbender (2005)
+        """.trimIndent()
+        // The 2005 entry should not bleed into a lookup for a different title with the same name.
+        assertTrue(ListEntryParser.parseSegments(listContent, "Avatar: The Last Airbender", 2024).isEmpty())
+        assertEquals(40, ListEntryParser.parseSegments(listContent, "Avatar: The Last Airbender", 2005).single().tier)
+        // No year given still matches, preserving old behavior for callers that don't have one.
+        assertEquals(40, ListEntryParser.parseSegments(listContent, "Avatar: The Last Airbender").single().tier)
+    }
+
     // --- extractBaseTitle ---
 
     @Test

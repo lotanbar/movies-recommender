@@ -99,7 +99,7 @@ class WishlistViewModel : ViewModel() {
         val downloadedListContent = listDeferred.await()
         listContent = downloadedListContent
         val items = titlesDeferred.map { title ->
-            WishlistItem(title, downloadedListContent?.let { SearchViewModel.parseRating(it, title.title) })
+            WishlistItem(title, downloadedListContent?.let { SearchViewModel.parseRating(it, title.title, title.year) })
         }
 
         val conflicts = items.filter { it.rating != null }

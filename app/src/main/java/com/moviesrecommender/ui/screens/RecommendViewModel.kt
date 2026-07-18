@@ -93,7 +93,7 @@ class RecommendViewModel : ViewModel() {
 
             val candidates = parseRecommendTitles(response)
                 .filter { (_, y) -> y >= 1990 }
-                .filterNot { (t, _) -> isTitleInRatedList(t, listContent) }
+                .filterNot { (t, y) -> isTitleInRatedList(t, y, listContent) }
                 .filterNot { (t, y) -> "$t ($y)" in app.recommendSkippedTitles }
                 .distinctBy { it.first.lowercase() }
 
@@ -168,21 +168,8 @@ private val TITLE_REGEX = Regex("""^(?:\d{1,2}[.)]\s+)?\[?(.+?)\s*\((\d{4})\)\]?
                 Pair(title, year)
             }
 
-        fun isTitleInRatedList(title: String, listContent: String): Boolean {
-            val titleLower = title.lowercase().trim()
-            var currentTier = -1
-            for (line in listContent.lines()) {
-                val trimmed = line.trim()
-                val tier = ListEntryParser.headerTier(trimmed)
-                if (tier != null) {
-                    currentTier = tier
-                } else if (currentTier in ListEntryParser.TIERS && trimmed.startsWith("-")) {
-                    val titlePart = trimmed.trimStart('-', ' ').trim().substringBefore("(").trim()
-                    if (ListEntryParser.extractBaseTitle(titlePart).lowercase() == titleLower) return true
-                }
-            }
-            return false
-        }
+        fun isTitleInRatedList(title: String, year: Int?, listContent: String): Boolean =
+            ListEntryParser.parseSegments(listContent, title, year).isNotEmpty()
 
         fun buildRatedTitlesBlacklist(listContent: String): String {
             val titles = mutableListOf<String>()

@@ -117,7 +117,7 @@ class PreviewViewModel(
     }
 
     private fun loadedState(title: Title, content: String): PreviewUiState.Loaded {
-        val segments = ListEntryParser.parseSegments(content, title.title)
+        val segments = ListEntryParser.parseSegments(content, title.title, title.year)
         val rating = segments.singleOrNull()?.takeIf { it.seasonStart == null }?.tier
         return PreviewUiState.Loaded(
             title = title,
@@ -285,7 +285,7 @@ class PreviewViewModel(
      */
     private fun clearDraftForSkip(loaded: PreviewUiState.Loaded, tier: Int, editing: ShowSegment?) {
         val base = draftListContent ?: listContent ?: ""
-        val draftSegments = ListEntryParser.parseSegments(base, loaded.title.title)
+        val draftSegments = ListEntryParser.parseSegments(base, loaded.title.title, loaded.title.year)
         val toRemove = if (editing != null) {
             draftSegments.filter { it.rawLine == editing.rawLine }
         } else {
@@ -295,7 +295,7 @@ class PreviewViewModel(
         var updated = base
         for (segment in toRemove) updated = ListEntryParser.removeLine(updated, segment.rawLine)
         draftListContent = updated
-        val newSegments = ListEntryParser.parseSegments(updated, loaded.title.title)
+        val newSegments = ListEntryParser.parseSegments(updated, loaded.title.title, loaded.title.year)
         val rating = newSegments.singleOrNull()?.takeIf { it.seasonStart == null }?.tier
         _uiState.value = loaded.copy(segments = newSegments, rating = rating)
     }
@@ -439,7 +439,7 @@ class PreviewViewModel(
         val loaded = _uiState.value as? PreviewUiState.Loaded ?: return
         val t = loaded.title
         val base = draftListContent ?: listContent ?: ""
-        val draftSegments = ListEntryParser.parseSegments(base, t.title)
+        val draftSegments = ListEntryParser.parseSegments(base, t.title, t.year)
         val yearStart = t.seasons.firstOrNull { it.seasonNumber == seasonStart }?.year ?: t.year
         val yearEnd = t.seasons.firstOrNull { it.seasonNumber == seasonEnd }?.year
         val newLine = ListEntryParser.formatSegmentEntry(t.title, seasonStart, seasonEnd, yearStart, yearEnd)
@@ -471,7 +471,7 @@ class PreviewViewModel(
         val entries = listOf(tier to newLine) + carveEntries
         val updated = ListEntryParser.upsertSegments(base, entries, replacingRawLines)
         draftListContent = updated
-        val draftSegments = ListEntryParser.parseSegments(updated, loaded.title.title)
+        val draftSegments = ListEntryParser.parseSegments(updated, loaded.title.title, loaded.title.year)
         val rating = draftSegments.singleOrNull()?.takeIf { it.seasonStart == null }?.tier
 
         if (thenFinalize) {

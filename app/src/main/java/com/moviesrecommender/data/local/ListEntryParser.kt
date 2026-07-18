@@ -74,8 +74,26 @@ object ListEntryParser {
     /** Base title with any trailing "Season(s) N(-M)" suffix stripped. */
     fun extractBaseTitle(titlePart: String): String = splitTitlePart(titlePart).base
 
-    /** Parses every rated entry in [listContent] whose base title matches [tmdbTitle], across all tiers. */
-    fun parseSegments(listContent: String, tmdbTitle: String): List<ShowSegment> {
+    /**
+     * True if [yearPart] (e.g. "2005" or "2010-2014") is consistent with [year] — used to
+     * disambiguate two different titles that happen to share a name (e.g. the 2005 animated
+     * "Avatar: The Last Airbender" vs. the 2024 live-action series). A [year] of null, or a
+     * [yearPart] that fails to parse, matches everything so legacy/free-text entries still work.
+     */
+    private fun yearMatches(yearPart: String, year: Int?): Boolean {
+        if (year == null) return true
+        val years = Regex("""\d{4}""").findAll(yearPart).map { it.value.toInt() }.toList()
+        if (years.isEmpty()) return true
+        return year in years.min()..years.max()
+    }
+
+    /**
+     * Parses every rated entry in [listContent] whose base title matches [tmdbTitle], across all
+     * tiers. When [year] is given, entries whose parenthesized year doesn't match are excluded —
+     * this is what keeps two different titles sharing a name (different release years) from
+     * colliding with each other's ratings.
+     */
+    fun parseSegments(listContent: String, tmdbTitle: String, year: Int? = null): List<ShowSegment> {
         val normalizedTarget = tmdbTitle.trim().lowercase()
         var currentTier = -1
         val segments = mutableListOf<ShowSegment>()
@@ -100,6 +118,7 @@ object ListEntryParser {
             val isPrefixMatch = !isWholeTitleMatch && parts.seasonStart == null &&
                 titlePart.lowercase().startsWith("$normalizedTarget ")
             if (!isWholeTitleMatch && !isPrefixMatch) continue
+            if (!yearMatches(yearPart, year)) continue
 
             val label = when {
                 parts.seasonStart != null && parts.seasonStart == parts.seasonEnd ->
