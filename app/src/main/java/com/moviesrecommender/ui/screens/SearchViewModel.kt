@@ -80,6 +80,19 @@ class SearchViewModel : ViewModel() {
 
     fun onQueryChange(q: String) { _query.value = q }
 
+    /**
+     * Refreshes displayed ratings from the list content Preview last wrote to
+     * [MoviesRecommenderApp.cachedListContent] — otherwise a rating applied in Preview and then
+     * backed out of never shows up in these results.
+     */
+    fun onScreenResumed() {
+        val fresh = app.cachedListContent ?: return
+        if (fresh == listContent) return
+        listContent = fresh
+        for (i in buffer.indices) buffer[i] = buffer[i].title.withRating()
+        _results.value = buffer.take(displayedCount)
+    }
+
     fun loadMore() {
         if (_isLoadingMore.value || _isSearching.value) return
         if (displayedCount >= buffer.size && currentPage >= totalPages) return
@@ -170,7 +183,7 @@ class SearchViewModel : ViewModel() {
     }
 
     private fun Title.withRating() =
-        TitleWithRating(this, listContent?.let { parseRating(it, title) })
+        TitleWithRating(this, listContent?.let { parseRating(it, title, year) })
 
     fun onLongPressAssess(tmdbId: Int, title: String, year: Int, currentRating: Int?) {
         if (currentRating != null) {
@@ -212,8 +225,8 @@ class SearchViewModel : ViewModel() {
          * split across tiers by season range shows its best tier here. The full per-range
          * breakdown is only shown on the Preview screen (see ListEntryParser.parseSegments).
          */
-        fun parseRating(listContent: String, titleToFind: String): Int? =
-            ListEntryParser.parseSegments(listContent, titleToFind).maxOfOrNull { it.tier }
+        fun parseRating(listContent: String, titleToFind: String, year: Int? = null): Int? =
+            ListEntryParser.parseSegments(listContent, titleToFind, year).maxOfOrNull { it.tier }
     }
 }
 
