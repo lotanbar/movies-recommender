@@ -9,6 +9,7 @@ class AnthropicAuthManager(private val store: TokenStore) {
         private const val KEY_MODEL_ID = "anthropic_model_id"
         private const val KEY_USE_HAIKU = "anthropic_use_haiku"
         private const val KEY_RECOMMEND_COUNT = "recommend_title_count"
+        private const val KEY_SHOW_STAT_POPUP = "show_stat_popup"
     }
 
     fun saveApiKey(key: String) { store[KEY_API_KEY] = key }
@@ -22,6 +23,9 @@ class AnthropicAuthManager(private val store: TokenStore) {
 
     fun getRecommendCount(): Int = store[KEY_RECOMMEND_COUNT]?.toIntOrNull() ?: 10
     fun setRecommendCount(value: Int) { store[KEY_RECOMMEND_COUNT] = value.coerceIn(1, 50).toString() }
+
+    fun getShowStatPopup(): Boolean = store[KEY_SHOW_STAT_POPUP] == "true"
+    fun setShowStatPopup(value: Boolean) { store[KEY_SHOW_STAT_POPUP] = if (value) "true" else "false" }
 
     fun isConfigured(): Boolean = store[KEY_API_KEY] != null && store[KEY_MODEL_ID] != null
 

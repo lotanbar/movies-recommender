@@ -86,7 +86,7 @@ class OkHttpAnthropicApiClient(
         cachedContent: String,
         instruction: String,
         system: String?,
-        effort: String,
+        effort: String?,
         onUsage: ((UsageStats) -> Unit)?
     ): String = withContext(Dispatchers.IO) {
         val systemBlocks = system?.let {
@@ -236,6 +236,10 @@ class OkHttpAnthropicApiClient(
                 put(JSONObject().apply {
                     put("type", "web_search_20260209")
                     put("name", "web_search")
+                    // Haiku 4.5 doesn't support programmatic tool calling, which this tool
+                    // requires by default — restrict it to direct (non-programmatic) calls
+                    // so web search works on every model, not just Sonnet/Opus.
+                    put("allowed_callers", org.json.JSONArray().apply { put("direct") })
                 })
             })
         }.toString()
@@ -249,18 +253,24 @@ class OkHttpAnthropicApiClient(
 
         return try {
             streamOnce(request)
-        } catch (e: RateLimitSignal) {
+        } catch (e: RetryableSignal) {
             if (retryCount < 3) {
                 delay((1L shl retryCount) * 1000L) // 1s, 2s, 4s
                 requestWithWebSearch(apiKey, modelId, system, messages, effort, retryCount + 1)
             } else {
-                throw AnthropicApiException.ServerError("Rate limit exceeded — please try again shortly.")
+                throw AnthropicApiException.ServerError(e.finalMessage)
             }
         }
     }
 
-    /** Internal signal used to trigger the 429 retry from inside [streamOnce]'s callback. */
-    private class RateLimitSignal : Exception()
+    /**
+     * Internal signal used to trigger a retry from inside [streamOnce]'s callback for transient,
+     * retryable failures — 429 rate limits, 500 server errors, and 529 overloaded — the same
+     * classes of error the official Anthropic SDKs retry with backoff.
+     */
+    private open class RetryableSignal(val finalMessage: String) : Exception()
+    private class RateLimitSignal : RetryableSignal("Rate limit exceeded — please try again shortly.")
+    private class ServerOverloadSignal : RetryableSignal("Claude is temporarily overloaded — please try again shortly.")
 
     /**
      * Opens an SSE connection and reconstructs the equivalent non-streaming response shape
@@ -324,8 +334,14 @@ class OkHttpAnthropicApiClient(
                         }
                     }
                     "error" -> {
-                        val message = obj.optJSONObject("error")?.optString("message") ?: "Stream error"
-                        cont.resumeWithException(AnthropicApiException.ServerError(message))
+                        val errorObj = obj.optJSONObject("error")
+                        when (errorObj?.optString("type")) {
+                            "overloaded_error", "api_error" -> cont.resumeWithException(ServerOverloadSignal())
+                            "rate_limit_error" -> cont.resumeWithException(RateLimitSignal())
+                            else -> cont.resumeWithException(
+                                AnthropicApiException.ServerError(errorObj?.optString("message") ?: "Stream error")
+                            )
+                        }
                     }
                     // "message_stop" and "ping" carry no data we need; content finalizes in onClosed.
                 }
@@ -339,6 +355,7 @@ class OkHttpAnthropicApiClient(
                 when {
                     code == 401 -> cont.resumeWithException(AnthropicApiException.Unauthorized())
                     code == 429 -> cont.resumeWithException(RateLimitSignal())
+                    code == 529 || (code != null && code >= 500) -> cont.resumeWithException(ServerOverloadSignal())
                     code != null -> {
                         val bodySnippet = try { response.body?.string() } catch (e: Exception) { null }
                         cont.resumeWithException(AnthropicApiException.ServerError("HTTP $code: ${bodySnippet ?: t?.message ?: "request failed"}"))
@@ -401,12 +418,14 @@ class OkHttpAnthropicApiClient(
                     Log.e("Anthropic", "401 Unauthorized — body: $body")
                     throw AnthropicApiException.Unauthorized()
                 }
-                response.code == 429 -> {
+                response.code == 429 || response.code == 529 || response.code >= 500 -> {
                     if (retryCount < 3) {
                         delay((1L shl retryCount) * 1000L) // 1s, 2s, 4s
                         execute(apiKey, request, retryCount + 1)
-                    } else {
+                    } else if (response.code == 429) {
                         throw AnthropicApiException.ServerError("Rate limit exceeded — please try again shortly.")
+                    } else {
+                        throw AnthropicApiException.ServerError("Claude is temporarily overloaded — please try again shortly.")
                     }
                 }
                 else -> throw AnthropicApiException.ServerError("HTTP ${response.code}: $body")

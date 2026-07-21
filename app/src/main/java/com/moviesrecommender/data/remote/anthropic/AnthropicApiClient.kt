@@ -36,7 +36,7 @@ interface AnthropicApiClient {
         cachedContent: String,
         instruction: String,
         system: String? = null,
-        effort: String = "medium",
+        effort: String? = "medium",
         onUsage: ((UsageStats) -> Unit)? = null
     ): String
 }

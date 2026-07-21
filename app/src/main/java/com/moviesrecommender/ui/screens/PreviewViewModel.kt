@@ -8,6 +8,7 @@ import com.moviesrecommender.data.local.ListEntryParser
 import com.moviesrecommender.data.local.ShowSegment
 import com.moviesrecommender.data.remote.anthropic.AnthropicError
 import com.moviesrecommender.data.remote.anthropic.AnthropicResult
+import com.moviesrecommender.data.remote.anthropic.UsageStats
 import com.moviesrecommender.data.remote.dropbox.DropboxError
 import com.moviesrecommender.data.remote.dropbox.DropboxResult
 import com.moviesrecommender.data.remote.tmdb.MediaType
@@ -101,9 +102,18 @@ class PreviewViewModel(
     private val _assessedTier = MutableStateFlow<Int?>(null)
     val assessedTier: StateFlow<Int?> = _assessedTier.asStateFlow()
 
+    private val _statsPopup = MutableStateFlow<UsageStats?>(null)
+    val statsPopup: StateFlow<UsageStats?> = _statsPopup.asStateFlow()
+
     private var assessJob: Job? = null
 
     init {
+        // Consume once: stats from the recommend call that produced this exact screen, so
+        // the popup appears over the already-loaded Preview instead of the loading spinner.
+        app.pendingStatsPopup?.let { stats ->
+            app.pendingStatsPopup = null
+            _statsPopup.value = stats
+        }
         val preloaded = app.cachedTitles[tmdbId]
         val cachedList = app.cachedListContent
         if (preloaded != null && cachedList != null) {
@@ -546,7 +556,9 @@ class PreviewViewModel(
                     }
                 }
             }
-            val result = app.anthropicService.sendPrompt("${title.title} (${title.year}) assess", content)
+            val result = app.anthropicService.sendPrompt("${title.title} (${title.year}) assess", content) { stats ->
+                if (app.anthropicService.authManager.getShowStatPopup()) _statsPopup.value = stats
+            }
             _isAssessing.value = false
             when (result) {
                 is AnthropicResult.Success -> ListEntryParser.parseAssessTier(result.value)?.let {
@@ -560,6 +572,10 @@ class PreviewViewModel(
     fun cancelAssess() {
         assessJob?.cancel()
         _isAssessing.value = false
+    }
+
+    fun dismissStatsPopup() {
+        _statsPopup.value = null
     }
 }
 

@@ -73,6 +73,7 @@ import com.moviesrecommender.data.local.ListEntryParser
 import com.moviesrecommender.data.local.ShowSegment
 import com.moviesrecommender.data.remote.tmdb.MediaType
 import com.moviesrecommender.ui.components.BusyOverlay
+import com.moviesrecommender.ui.components.UsageStatsDialog
 import com.moviesrecommender.ui.components.formatElapsed
 import com.moviesrecommender.ui.components.rememberAssessPulseAlpha
 import com.moviesrecommender.ui.components.rememberElapsedSeconds
@@ -94,6 +95,11 @@ fun PreviewScreen(
     val uiState by viewModel.uiState.collectAsState()
     val isAssessing by viewModel.isAssessing.collectAsState()
     val assessedTier by viewModel.assessedTier.collectAsState()
+    val statsPopup by viewModel.statsPopup.collectAsState()
+
+    statsPopup?.let { stats ->
+        UsageStatsDialog(stats = stats, onDismiss = { viewModel.dismissStatsPopup() })
+    }
 
     // Recommend mode: after rating/skip, navigate to next item or pop back to RecommendScreen for new batch
     if (source == "recommend") {

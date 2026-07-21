@@ -50,6 +50,7 @@ fun SetupScreen(
     val listPathSet by setupViewModel.listPathSet.collectAsState()
     val isLoading by setupViewModel.isLoading.collectAsState()
     val useHaiku by setupViewModel.useHaiku.collectAsState()
+    val showStatPopup by setupViewModel.showStatPopup.collectAsState()
     val apiKey by setupViewModel.apiKey.collectAsState()
     val apiKeySet by setupViewModel.apiKeySet.collectAsState()
 
@@ -163,10 +164,9 @@ fun SetupScreen(
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
             ) {
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Text("Use Haiku model", style = MaterialTheme.typography.bodyLarge)
                     Text(
                         if (useHaiku) "claude-haiku-4-5 (cheaper)" else "claude-sonnet-5 (default)",
@@ -174,9 +174,31 @@ fun SetupScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
+                Spacer(Modifier.width(12.dp))
                 Switch(
                     checked = useHaiku,
                     onCheckedChange = { setupViewModel.toggleUseHaiku(it) }
+                )
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Show stat popup after agent responses", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "Cost, tokens, and time after each Recommend / Assess call",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Spacer(Modifier.width(12.dp))
+                Switch(
+                    checked = showStatPopup,
+                    onCheckedChange = { setupViewModel.toggleShowStatPopup(it) }
                 )
             }
 

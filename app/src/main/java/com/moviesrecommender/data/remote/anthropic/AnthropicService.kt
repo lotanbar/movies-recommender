@@ -45,10 +45,11 @@ class AnthropicService(
     }
 
     /** [listContent] and the system prompt are cached (identical across retries); [mode] varies per request. */
-    suspend fun sendPrompt(mode: String, listContent: String): AnthropicResult<String> {
+    suspend fun sendPrompt(mode: String, listContent: String, onUsage: ((UsageStats) -> Unit)? = null): AnthropicResult<String> {
         return try {
             val isAssess = mode.endsWith("assess")
-            val effort = "medium"
+            // Haiku 4.5 doesn't support output_config.effort at all — sending it 400s.
+            val effort = if (authManager.getUseHaiku()) null else if (isAssess) "medium" else "high"
             val statsMode = if (isAssess) "assess" else "recommend"
             val response = apiClient.sendCachedMessage(
                 requireApiKey(),
@@ -71,6 +72,7 @@ class AnthropicService(
                         )
                     }
                 }
+                onUsage?.invoke(stats)
             }
             AnthropicResult.Success(response.trim())
         } catch (e: AnthropicApiException) {

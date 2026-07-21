@@ -8,6 +8,7 @@ import com.moviesrecommender.data.local.UsageStatsService
 import com.moviesrecommender.data.remote.anthropic.AnthropicAuthManager
 import com.moviesrecommender.data.remote.anthropic.AnthropicService
 import com.moviesrecommender.data.remote.anthropic.OkHttpAnthropicApiClient
+import com.moviesrecommender.data.remote.anthropic.UsageStats
 import com.moviesrecommender.data.remote.dropbox.DropboxAuthManager
 import com.moviesrecommender.data.remote.dropbox.DropboxService
 import com.moviesrecommender.data.remote.dropbox.OkHttpDropboxApiClient
@@ -71,6 +72,9 @@ class MoviesRecommenderApp : Application() {
 
     /** Optional specification appended as "titles about: ..." in the recommend prompt. */
     var recommendSpec: String = ""
+
+    /** Stats from the most recent recommend call, consumed once by PreviewScreen after it loads. */
+    var pendingStatsPopup: UsageStats? = null
 
     companion object {
         lateinit var instance: MoviesRecommenderApp

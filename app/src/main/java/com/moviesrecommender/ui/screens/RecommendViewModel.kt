@@ -83,7 +83,9 @@ class RecommendViewModel : ViewModel() {
                     app.recommendSkippedTitles.joinToString("\n") { "- $it" }
             } else ""
             val prompt = "recommend $count $titlesClause$avoidClause"
-            val result = app.anthropicService.sendPrompt(prompt, listContent)
+            val result = app.anthropicService.sendPrompt(prompt, listContent) { stats ->
+                if (app.anthropicService.authManager.getShowStatPopup()) app.pendingStatsPopup = stats
+            }
             if (result is AnthropicResult.Failure) {
                 _uiState.value = RecommendUiState.Error(result.error.toMessage())
                 return@launch

@@ -30,6 +30,9 @@ class SetupViewModel : ViewModel() {
     private val _useHaiku = MutableStateFlow(anthropicAuthManager.getUseHaiku())
     val useHaiku = _useHaiku.asStateFlow()
 
+    private val _showStatPopup = MutableStateFlow(anthropicAuthManager.getShowStatPopup())
+    val showStatPopup = _showStatPopup.asStateFlow()
+
     private val _apiKey = MutableStateFlow(anthropicAuthManager.getApiKey())
     val apiKey = _apiKey.asStateFlow()
 
@@ -39,6 +42,11 @@ class SetupViewModel : ViewModel() {
     fun toggleUseHaiku(value: Boolean) {
         anthropicAuthManager.setUseHaiku(value)
         _useHaiku.value = value
+    }
+
+    fun toggleShowStatPopup(value: Boolean) {
+        anthropicAuthManager.setShowStatPopup(value)
+        _showStatPopup.value = value
     }
 
     fun saveApiKey(key: String) {
