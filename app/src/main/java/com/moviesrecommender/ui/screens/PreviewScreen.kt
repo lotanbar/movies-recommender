@@ -411,7 +411,7 @@ private fun LoadedContent(
                             Box(
                                 modifier = Modifier
                                     .weight(1f)
-                                    .heightIn(max = 64.dp)
+                                    .heightIn(max = 70.dp)
                                     .verticalScroll(titleScrollState)
                                     .scrollbar(titleScrollState)
                                     .padding(end = 8.dp)
@@ -424,8 +424,8 @@ private fun LoadedContent(
                                         append(" (${title.year})")
                                     },
                                     style = MaterialTheme.typography.headlineSmall.copy(
-                                        fontSize = MaterialTheme.typography.headlineSmall.fontSize * 0.8f,
-                                        lineHeight = MaterialTheme.typography.headlineSmall.lineHeight * 0.8f
+                                        fontSize = MaterialTheme.typography.headlineSmall.fontSize * 0.88f,
+                                        lineHeight = MaterialTheme.typography.headlineSmall.lineHeight * 0.88f
                                     )
                                 )
                             }
@@ -434,7 +434,9 @@ private fun LoadedContent(
                                 val m = mins % 60
                                 Text(
                                     text = if (h > 0) "${h}h ${m}m" else "${m}m",
-                                    style = MaterialTheme.typography.titleLarge,
+                                    style = MaterialTheme.typography.titleLarge.copy(
+                                        fontSize = MaterialTheme.typography.titleLarge.fontSize * 1.1f
+                                    ),
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.align(Alignment.CenterVertically)
                                 )
@@ -444,7 +446,7 @@ private fun LoadedContent(
                                 contentDescription = if (title.mediaType == MediaType.TV) "TV" else "Film",
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier
-                                    .size(22.dp)
+                                    .size(24.dp)
                                     .align(Alignment.CenterVertically)
                             )
                         }

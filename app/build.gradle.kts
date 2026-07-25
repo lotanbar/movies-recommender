@@ -19,8 +19,8 @@ android {
         applicationId = "com.moviesrecommender"
         minSdk = 26
         targetSdk = 35
-        versionCode = 11
-        versionName = "1.12"
+        versionCode = 12
+        versionName = "1.13"
         buildConfigField("String", "DROPBOX_APP_KEY", "\"${localProps.getProperty("dropbox.app.key", "")}\"")
         buildConfigField("String", "ANTHROPIC_API_KEY", "\"${localProps.getProperty("anthropic.api.key", "")}\"")
     }
