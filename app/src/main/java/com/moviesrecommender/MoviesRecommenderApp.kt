@@ -73,6 +73,9 @@ class MoviesRecommenderApp : Application() {
     /** Optional specification appended as "titles about: ..." in the recommend prompt. */
     var recommendSpec: String = ""
 
+    /** Whether to add "easy" to the recommend prompt. */
+    var recommendEasy: Boolean = false
+
     /** Stats from the most recent recommend call, consumed once by PreviewScreen after it loads. */
     var pendingStatsPopup: UsageStats? = null
 

@@ -77,12 +77,13 @@ class RecommendViewModel : ViewModel() {
             Log.d("Recommend", "listContent length=${listContent.length}")
 
             val count = app.anthropicService.authManager.getRecommendCount()
+            val easyClause = if (app.recommendEasy) "easy " else ""
             val titlesClause = if (app.recommendSpec.isNotBlank()) "titles about: ${app.recommendSpec.trim()}" else "titles"
             val avoidClause = if (app.recommendSkippedTitles.isNotEmpty()) {
                 "\n\nDo not recommend any of these — already shown or skipped this session:\n" +
                     app.recommendSkippedTitles.joinToString("\n") { "- $it" }
             } else ""
-            val prompt = "recommend $count $titlesClause$avoidClause"
+            val prompt = "recommend $count $easyClause$titlesClause$avoidClause"
             val result = app.anthropicService.sendPrompt(prompt, listContent) { stats ->
                 if (app.anthropicService.authManager.getShowStatPopup()) app.pendingStatsPopup = stats
             }

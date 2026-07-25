@@ -46,6 +46,7 @@ fun ActionsScreen(navController: NavHostController) {
     val app = MoviesRecommenderApp.instance
     var specText by remember { mutableStateOf(app.recommendSpec) }
     var countInput by remember { mutableStateOf(app.anthropicService.authManager.getRecommendCount().toString()) }
+    var easyEnabled by remember { mutableStateOf(app.recommendEasy) }
 
     fun resolvedCount(): Int = countInput.toIntOrNull()?.coerceIn(1, 50)
         ?: app.anthropicService.authManager.getRecommendCount()
@@ -120,22 +121,7 @@ fun ActionsScreen(navController: NavHostController) {
 
             HorizontalDivider()
 
-            // Recommend spec: [titles about: input]
-            OutlinedTextField(
-                value = specText,
-                onValueChange = { specText = it; app.recommendSpec = it },
-                modifier = Modifier.fillMaxWidth().height(BUTTON_HEIGHT),
-                singleLine = true,
-                shape = CORNER,
-                placeholder = {
-                    Text(
-                        "titles about: ...",
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
-                    )
-                }
-            )
-
-            // [Recommend] [number input] — kept at the bottom of the action list
+            // [Recommend] [number input] [E]
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -162,13 +148,69 @@ fun ActionsScreen(navController: NavHostController) {
                     onValueChange = { input ->
                         if (input.length <= 2 && input.all { it.isDigit() }) countInput = input
                     },
-                    modifier = Modifier.width(72.dp).height(BUTTON_HEIGHT),
+                    modifier = Modifier.width(56.dp).height(BUTTON_HEIGHT),
                     singleLine = true,
                     shape = CORNER,
-                    textStyle = MaterialTheme.typography.titleLarge,
+                    textStyle = MaterialTheme.typography.titleLarge.copy(textAlign = androidx.compose.ui.text.style.TextAlign.Center),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
                 )
+
+                val easyContentColor = if (easyEnabled) {
+                    MaterialTheme.colorScheme.onPrimary
+                } else {
+                    MaterialTheme.colorScheme.primary
+                }
+                Button(
+                    onClick = {
+                        easyEnabled = !easyEnabled
+                        app.recommendEasy = easyEnabled
+                    },
+                    modifier = Modifier.width(56.dp).height(BUTTON_HEIGHT),
+                    shape = CORNER,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, easyContentColor),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
+                    colors = if (easyEnabled) {
+                        androidx.compose.material3.ButtonDefaults.buttonColors()
+                    } else {
+                        androidx.compose.material3.ButtonDefaults.outlinedButtonColors()
+                    }
+                ) {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(text = "E", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold))
+                    }
+                }
             }
+
+            // Recommend spec: [about: input]
+            OutlinedTextField(
+                value = specText,
+                onValueChange = { specText = it; app.recommendSpec = it },
+                modifier = Modifier.fillMaxWidth().height(BUTTON_HEIGHT),
+                singleLine = true,
+                shape = CORNER,
+                placeholder = {
+                    Text(
+                        "about: ...",
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+                    )
+                }
+            )
+
+            // Live preview of the resulting prompt
+            val previewCount = countInput.toIntOrNull()?.coerceIn(1, 50)
+                ?: app.anthropicService.authManager.getRecommendCount()
+            val previewEasy = if (easyEnabled) "easy " else ""
+            val previewTitles = if (specText.isNotBlank()) "titles about: ${specText.trim()}" else "titles"
+            val previewPrompt = "recommend $previewCount $previewEasy$previewTitles"
+
+            Text(
+                text = previewPrompt,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+            )
         }
     }
 }
