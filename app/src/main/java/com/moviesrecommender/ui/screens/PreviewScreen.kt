@@ -8,7 +8,10 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,6 +20,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -55,6 +59,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -64,6 +72,7 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
@@ -351,90 +360,122 @@ private fun LoadedContent(
                 else -> {
                     // Poster page — single tap opens IMDB, long-press triggers Assess mode
                     val pulseAlpha = rememberAssessPulseAlpha(isAssessing)
-                    Box(
-                        modifier = Modifier
-                            .padding(start = 8.dp, end = 8.dp, top = 4.dp, bottom = 2.dp)
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(MaterialTheme.colorScheme.surfaceVariant)
-                            .combinedClickable(
-                                indication = null,
-                                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
-                                onClick = { title.imdbId?.let { openUrl("https://www.imdb.com/title/$it/") } },
-                                onLongClick = onLongPressAssess,
-                                onDoubleClick = onDoubleTap
-                            )
-                    ) {
-                        AsyncImage(
-                            model = title.posterUrl(500),
-                            contentDescription = title.title,
-                            contentScale = ContentScale.FillWidth,
-                            modifier = Modifier.fillMaxWidth()
-                        )
+                    Column(modifier = Modifier.fillMaxSize()) {
+                        Spacer(modifier = Modifier.weight(1f))
                         Box(
                             modifier = Modifier
-                                .matchParentSize()
-                                .background(MaterialTheme.colorScheme.primary.copy(alpha = pulseAlpha))
-                        )
+                                .padding(start = 8.dp, end = 8.dp, top = 4.dp, bottom = 2.dp)
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(MaterialTheme.colorScheme.surfaceVariant)
+                                .combinedClickable(
+                                    indication = null,
+                                    interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                                    onClick = { title.imdbId?.let { openUrl("https://www.imdb.com/title/$it/") } },
+                                    onLongClick = onLongPressAssess,
+                                    onDoubleClick = onDoubleTap
+                                )
+                        ) {
+                            AsyncImage(
+                                model = title.posterUrl(500),
+                                contentDescription = title.title,
+                                contentScale = ContentScale.FillWidth,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .matchParentSize()
+                                    .background(MaterialTheme.colorScheme.primary.copy(alpha = pulseAlpha))
+                            )
+                        }
+
+                        // Title banner, stuck directly to the bottom of the poster thumbnail.
+                        // Text scrolls vertically within a capped height; runtime/type icon stay put on the right.
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(start = 16.dp, end = 16.dp, top = 12.dp)
+                                .combinedClickable(
+                                    indication = null,
+                                    interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                                    onClick = {},
+                                    onLongClick = {
+                                        clipboardManager.setText(AnnotatedString(title.title))
+                                        ToastManager.show("Copied to clipboard")
+                                    }
+                                ),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            val titleScrollState = rememberScrollState()
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .heightIn(max = 64.dp)
+                                    .verticalScroll(titleScrollState)
+                                    .scrollbar(titleScrollState)
+                                    .padding(end = 8.dp)
+                            ) {
+                                Text(
+                                    text = buildAnnotatedString {
+                                        pushStyle(SpanStyle(fontWeight = FontWeight(560)))
+                                        append(title.title)
+                                        pop()
+                                        append(" (${title.year})")
+                                    },
+                                    style = MaterialTheme.typography.headlineSmall.copy(
+                                        fontSize = MaterialTheme.typography.headlineSmall.fontSize * 0.8f,
+                                        lineHeight = MaterialTheme.typography.headlineSmall.lineHeight * 0.8f
+                                    )
+                                )
+                            }
+                            title.runtime?.let { mins ->
+                                val h = mins / 60
+                                val m = mins % 60
+                                Text(
+                                    text = if (h > 0) "${h}h ${m}m" else "${m}m",
+                                    style = MaterialTheme.typography.titleLarge,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.align(Alignment.CenterVertically)
+                                )
+                            }
+                            Icon(
+                                imageVector = if (title.mediaType == MediaType.TV) Icons.Filled.Tv else Icons.Filled.Movie,
+                                contentDescription = if (title.mediaType == MediaType.TV) "TV" else "Film",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier
+                                    .size(22.dp)
+                                    .align(Alignment.CenterVertically)
+                            )
+                        }
+                        Spacer(modifier = Modifier.weight(0.55f))
                     }
                 }
             }
         }
+    }
+}
 
-        // Title banner, anchored just below the poster, away from the bottom rating bar
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f),
-            contentAlignment = Alignment.TopCenter
-        ) {
-        Row(
-            modifier = Modifier
-                .padding(start = 16.dp, end = 16.dp, top = 12.dp)
-                .combinedClickable(
-                    indication = null,
-                    interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
-                    onClick = {},
-                    onLongClick = {
-                        clipboardManager.setText(AnnotatedString(title.title))
-                        ToastManager.show("Copied to clipboard")
-                    }
-                ),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Text(
-                text = buildAnnotatedString {
-                    pushStyle(SpanStyle(fontWeight = FontWeight.Bold))
-                    append(title.title)
-                    pop()
-                    append(" (${title.year})")
-                },
-                style = MaterialTheme.typography.headlineSmall,
-                modifier = Modifier
-                    .weight(1f)
-                    .align(Alignment.CenterVertically)
-            )
-            title.runtime?.let { mins ->
-                val h = mins / 60
-                val m = mins % 60
-                Text(
-                    text = if (h > 0) "${h}h ${m}m" else "${m}m",
-                    style = MaterialTheme.typography.titleLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.align(Alignment.CenterVertically)
-                )
-            }
-            Icon(
-                imageVector = if (title.mediaType == MediaType.TV) Icons.Filled.Tv else Icons.Filled.Movie,
-                contentDescription = if (title.mediaType == MediaType.TV) "TV" else "Film",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier
-                    .size(22.dp)
-                    .align(Alignment.CenterVertically)
-            )
-        }
-        }
+/** Draws a thin thumb indicating scroll position/extent for a vertically [verticalScroll]-ed container. */
+private fun Modifier.scrollbar(
+    state: ScrollState,
+    width: Dp = 3.dp,
+    color: Color = Color.Gray.copy(alpha = 0.6f)
+): Modifier = drawWithContent {
+    drawContent()
+    val maxValue = state.maxValue
+    if (maxValue > 0) {
+        val viewportHeight = size.height
+        val totalHeight = viewportHeight + maxValue
+        val thumbHeight = (viewportHeight / totalHeight) * viewportHeight
+        val thumbOffsetY = (state.value.toFloat() / maxValue) * (viewportHeight - thumbHeight)
+        val thumbWidthPx = width.toPx()
+        drawRoundRect(
+            color = color,
+            topLeft = Offset(size.width - thumbWidthPx, thumbOffsetY),
+            size = Size(thumbWidthPx, thumbHeight),
+            cornerRadius = CornerRadius(thumbWidthPx / 2, thumbWidthPx / 2)
+        )
     }
 }
 
